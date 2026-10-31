@@ -70,20 +70,27 @@ public final class PianoView extends View {
     }
 
     /** Centres the keyboard on a pitch (e.g. middle of the current clef). */
+    private int pendingCenter = -1;
+
     public void centerOn(int pitch) {
         if (getWidth() == 0) {
-            final int p = pitch;
-            post(new Runnable() {
-                @Override
-                public void run() {
-                    centerOn(p);
-                }
-            });
+            // not laid out yet (the keyboard starts hidden): apply once it gets a size
+            pendingCenter = pitch;
             return;
         }
         int whites = whiteCount();
         int idx = whiteIndex(pitch) - whites / 2;
         setFirstWhiteIndex(idx);
+    }
+
+    @Override
+    protected void onSizeChanged(int w, int h, int ow, int oh) {
+        super.onSizeChanged(w, h, ow, oh);
+        if (w > 0 && pendingCenter >= 0) {
+            int p = pendingCenter;
+            pendingCenter = -1;
+            centerOn(p);
+        }
     }
 
     public void shiftOctave(int dir) {

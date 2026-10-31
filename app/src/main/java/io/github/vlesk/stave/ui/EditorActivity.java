@@ -259,6 +259,7 @@ public final class EditorActivity extends Activity implements ScoreView.Listener
         titleView.setTextSize(20);
         statusView = Ui.text(this, "", 12, t.onSurfaceVariant, false);
         statusView.setSingleLine(true);
+        statusView.setEllipsize(android.text.TextUtils.TruncateAt.END);
         titles.addView(titleView);
         titles.addView(statusView);
         titles.setOnClickListener(new View.OnClickListener() {
@@ -750,7 +751,7 @@ public final class EditorActivity extends Activity implements ScoreView.Listener
     // ------------------------------------------------------------------ saving / export
 
     private void save(final boolean announce) {
-        if (st == null || scoreId == null || st.revision == savedRevision) return;
+        if (st == null || scoreId == null || st.revision == savedRevision || io.isShutdown()) return;
         final Score copy = st.score.copy();
         final int rev = st.revision;
         final String id = scoreId;

@@ -40,8 +40,11 @@ fi
 
 rm -rf "$BUILD" && mkdir -p "$BUILD/gen" "$BUILD/classes"
 echo "== resources"
+# Gradle takes the package name from build.gradle's namespace; aapt2 needs it in the manifest.
+sed 's|<manifest xmlns:android="http://schemas.android.com/apk/res/android">|<manifest xmlns:android="http://schemas.android.com/apk/res/android" package="io.github.vlesk.stave">|' \
+  "$APP/AndroidManifest.xml" > "$BUILD/AndroidManifest.xml"
 aapt2 compile --dir "$APP/res" -o "$BUILD/res.zip"
-aapt2 link -I "$CACHE/android-34-res.jar" --manifest "$APP/AndroidManifest.xml" -A "$APP/assets" \
+aapt2 link -I "$CACHE/android-34-res.jar" --manifest "$BUILD/AndroidManifest.xml" -A "$APP/assets" \
   --min-sdk-version $MIN_SDK --target-sdk-version $TARGET_SDK --version-code "$VERSION_CODE" --version-name "$VERSION_NAME" \
   --java "$BUILD/gen" --auto-add-overlay -o "$BUILD/base.apk" "$BUILD/res.zip"
 echo "== java"

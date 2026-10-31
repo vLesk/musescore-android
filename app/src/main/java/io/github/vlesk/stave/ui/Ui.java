@@ -69,8 +69,27 @@ public final class Ui {
     }
 
     /** A 48dp square toggle button showing a music glyph (Leland) or text. */
+    /** TextView that centres its (music) glyph on the glyph's ink bounds rather than the font baseline. */
+    static final class GlyphView extends TextView {
+        private final android.graphics.Rect b = new android.graphics.Rect();
+
+        GlyphView(Context c) {
+            super(c);
+        }
+
+        @Override
+        protected void onDraw(android.graphics.Canvas canvas) {
+            android.graphics.Paint p = getPaint();
+            p.setColor(getCurrentTextColor());
+            p.setTextAlign(android.graphics.Paint.Align.CENTER);
+            String s = getText().toString();
+            p.getTextBounds(s, 0, s.length(), b);
+            canvas.drawText(s, getWidth() / 2f, getHeight() / 2f - (b.top + b.bottom) / 2f, p);
+        }
+    }
+
     public static TextView glyphButton(Context c, Theme t, String glyph, boolean music, float textSp, String desc, View.OnClickListener l) {
-        TextView v = new TextView(c);
+        TextView v = music ? new GlyphView(c) : new TextView(c);
         v.setText(glyph);
         v.setGravity(Gravity.CENTER);
         v.setTypeface(music ? Theme.music(c) : Typeface.create("sans-serif-medium", Typeface.NORMAL));
