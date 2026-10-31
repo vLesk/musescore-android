@@ -308,6 +308,7 @@ public final class MscxWriter {
                 x.open("Chord");
                 if (c.dots > 0) x.tag("dots", c.dots);
                 x.tag("durationType", Duration.xmlName(c.type));
+                if (c.stemDir != Chord.STEM_AUTO) x.tag("StemDirection", c.stemDir == Chord.STEM_UP ? "up" : "down");
                 if (c.lyric != null && !c.lyric.isEmpty()) {
                     x.open("Lyrics");
                     x.tag("text", c.lyric);

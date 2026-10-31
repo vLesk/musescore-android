@@ -358,6 +358,9 @@ public final class MscxReader {
                     Chord c = new Chord();
                     c.type = Math.max(0, Duration.typeFromXml(Xml.text(el, "durationType")));
                     c.dots = Xml.intText(el, "dots", 0);
+                    String sd = Xml.text(el, "StemDirection");
+                    if ("up".equals(sd)) c.stemDir = Chord.STEM_UP;
+                    else if ("down".equals(sd)) c.stemDir = Chord.STEM_DOWN;
                     for (Element ne : Xml.children(el, "Note")) {
                         int pitch = Xml.intText(ne, "pitch", 60);
                         int tpc = Xml.intText(ne, "tpc", -100);

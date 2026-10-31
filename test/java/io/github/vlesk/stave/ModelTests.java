@@ -190,6 +190,53 @@ public class ModelTests {
         Score pk3 = MusicXmlReader.read(MusicXmlWriter.write(pk).getBytes("UTF-8")).score;
         check(pk3.measures.get(0).ticks() == 480, "pickup musicxml reload " + pk3.measures.get(0).ticks());
 
+        // editor session (note input as the UI drives it)
+        {
+            io.github.vlesk.stave.edit.EditorState es = new io.github.vlesk.stave.edit.EditorState(pianoScore());
+            es.startInput();
+            es.setDuration(Duration.EIGHTH);
+            for (int i = 0; i < 6; i++) es.enterPitch(60 + i * 2, Integer.MIN_VALUE);
+            es.chordMode = true;
+            es.enterPitch(76, Integer.MIN_VALUE);
+            es.chordMode = false;
+            check(((Chord) es.selectedChordRest()).notes.size() == 2, "chord mode adds note");
+            es.transpose(1);
+            es.applyAccidental(-1);
+            es.enterTie();
+            es.enterRest();
+            es.triplet = true;
+            es.enterPitch(67, 1);
+            es.triplet = false;
+            es.enterLetter(4, false);
+            es.enterLetter(0, true);
+            es.moveCursor(-1);
+            es.deleteSelection();
+            checkVoicesFit(es.score, "editor input");
+            int before = es.score.measures.size();
+            es.undo();
+            es.redo();
+            es.stopInput();
+            es.selectMeasure(1, 0);
+            es.extendTo(2, 2);
+            es.copy();
+            es.selectMeasure(3, 0);
+            es.paste();
+            es.transpose(-2);
+            es.toggleArticulation(Articulation.ACCENT);
+            es.setDynamic("ff");
+            es.setClef(Clef.BASS);
+            es.setKeySig(-3);
+            es.setTimeSig(6, 8, false);
+            es.setBarline(Measure.BAR_DOUBLE);
+            es.insertMeasureBefore();
+            es.appendMeasures(2);
+            es.deleteSelectedMeasures();
+            checkVoicesFit(es.score, "editor ops");
+            check(es.score.measures.size() >= before - 2, "measures sane");
+            while (es.canUndo()) es.undo();
+            checkVoicesFit(es.score, "undo all");
+        }
+
         // MuseScore's own test files
         int ok = 0, total = 0;
         if (args.length > 0) {

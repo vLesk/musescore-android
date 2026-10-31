@@ -1,0 +1,15 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp" android:height="108dp"
+    android:viewportWidth="108" android:viewportHeight="108">
+    <!-- five staff lines -->
+    <path android:fillColor="#40FFFFFF" android:pathData="M22,40h64v1.6h-64z M22,48h64v1.6h-64z M22,56h64v1.6h-64z M22,64h64v1.6h-64z M22,72h64v1.6h-64z"/>
+    <!-- beamed eighth notes -->
+    <path android:fillColor="#FFFFFFFF" android:pathData="M46,33 L74,27 L74,34 L46,40 Z"/>
+    <path android:fillColor="#FFFFFFFF" android:pathData="M46,36 h3 v36 h-3 z M71,30 h3 v35 h-3 z"/>
+    <group android:rotation="-22" android:pivotX="40" android:pivotY="72.5">
+        <path android:fillColor="#FFFFFFFF" android:pathData="M31,72.5 a9,6.4 0 1,0 18,0 a9,6.4 0 1,0 -18,0 z"/>
+    </group>
+    <group android:rotation="-22" android:pivotX="65" android:pivotY="65.5">
+        <path android:fillColor="#FFFFFFFF" android:pathData="M56,65.5 a9,6.4 0 1,0 18,0 a9,6.4 0 1,0 -18,0 z"/>
+    </group>
+</vector>

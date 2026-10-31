@@ -6,6 +6,9 @@ import java.util.List;
 /** One or more notes sharing a stem. Notes are kept sorted from lowest to highest. */
 public final class Chord extends ChordRest {
     public final List<Note> notes = new ArrayList<Note>();
+    public static final int STEM_AUTO = 0, STEM_UP = 1, STEM_DOWN = 2;
+    /** Explicit stem direction (MuseScore's StemDirection), STEM_AUTO by default. */
+    public int stemDir;
 
     @Override
     public boolean isRest() {
@@ -43,6 +46,7 @@ public final class Chord extends ChordRest {
     public Chord copy() {
         Chord c = new Chord();
         copyInto(c);
+        c.stemDir = stemDir;
         for (Note n : notes) c.notes.add(n.copy());
         return c;
     }

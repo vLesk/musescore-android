@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Material 3 tonal palette (seed #2C5BA8, "staff blue") -->
+    <color name="md_primary">#2C5BA8</color>
+    <color name="md_on_primary">#FFFFFF</color>
+    <color name="md_primary_container">#D7E2FF</color>
+    <color name="md_on_primary_container">#001A40</color>
+    <color name="md_surface">#FAF9FD</color>
+    <color name="md_surface_container">#EEEDF4</color>
+    <color name="md_surface_container_high">#E8E7EF</color>
+    <color name="md_on_surface">#1A1B20</color>
+    <color name="md_on_surface_variant">#44474F</color>
+    <color name="md_outline">#74777F</color>
+    <color name="md_outline_variant">#C4C6D0</color>
+    <color name="ic_launcher_background">#2C5BA8</color>
+</resources>

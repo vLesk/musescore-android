@@ -6,7 +6,7 @@ Usage: python3 tools/gen_glyphs.py third_party/smufl app/src/main/java/io/github
 import json, sys, os
 
 GLYPHS = """
-noteheadDoubleWhole noteheadWhole noteheadHalf noteheadBlack
+noteheadDoubleWhole noteheadWhole noteheadHalf noteheadBlack noteheadXBlack
 gClef fClef cClef gClef8vb gClef8va fClef8vb unpitchedPercussionClef1
 restDoubleWhole restWhole restHalf restQuarter rest8th rest16th rest32nd rest64th
 flag8thUp flag16thUp flag32ndUp flag64thUp flag8thDown flag16thDown flag32ndDown flag64thDown

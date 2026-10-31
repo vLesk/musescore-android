@@ -7,6 +7,7 @@ OUT="${TMPDIR:-/tmp}/stave-test-classes"
 rm -rf "$OUT" && mkdir -p "$OUT"
 SRC=$(find "$ROOT/app/src/main/java/io/github/vlesk/stave/model" "$ROOT/app/src/main/java/io/github/vlesk/stave/io" \
   "$ROOT/app/src/main/java/io/github/vlesk/stave/audio/Timeline.java" "$ROOT/app/src/main/java/io/github/vlesk/stave/audio/MidiWriter.java" \
-  "$ROOT/app/src/main/java/io/github/vlesk/stave/engrave" "$ROOT/test/java" -name '*.java')
+  "$ROOT/app/src/main/java/io/github/vlesk/stave/engrave" "$ROOT/app/src/main/java/io/github/vlesk/stave/edit" "$ROOT/test/java" -name '*.java')
 javac -nowarn -d "$OUT" $SRC
 java -cp "$OUT" io.github.vlesk.stave.ModelTests "$@"
+if [ -n "${RENDER_DIR:-}" ]; then java -cp "$OUT" io.github.vlesk.stave.RenderPng "$ROOT/app/src/main/assets/fonts" "$RENDER_DIR"; fi

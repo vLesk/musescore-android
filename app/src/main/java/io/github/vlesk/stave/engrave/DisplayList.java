@@ -1,0 +1,90 @@
+package io.github.vlesk.stave.engrave;
+
+import io.github.vlesk.stave.model.ChordRest;
+import io.github.vlesk.stave.model.Note;
+import io.github.vlesk.stave.model.Pos;
+
+import java.util.ArrayList;
+import java.util.List;
+
+/**
+ * Output of the layout engine: drawing primitives in staff-space units (y down), plus
+ * hit-test regions and geometry needed for cursors. Rendering backends only need to
+ * draw these primitives.
+ */
+public final class DisplayList {
+    public static final int GLYPH = 0, LINE = 1, POLY = 2, TEXT = 3, RECT = 4, RECT_OUTLINE = 5;
+    public static final int ALIGN_LEFT = 0, ALIGN_CENTER = 1, ALIGN_RIGHT = 2;
+    /** Colour roles (resolved by the renderer's theme). */
+    public static final int C_INK = 0, C_MUTED = 1, C_ACCENT = 2, C_FRAME = 3;
+
+    public static final class Item {
+        public int kind;
+        public float x, y, x2, y2;
+        /** Line width for LINE / outline, glyph scale for GLYPH, em size for TEXT. */
+        public float w;
+        public int glyph;
+        public String text;
+        public int font;
+        public int align;
+        public float[] pts;
+        public int color;
+        /** Model element this item belongs to (for selection / playback highlighting). */
+        public ChordRest owner;
+        public Note note;
+        public int voice;
+    }
+
+    /** A tappable element. */
+    public static final class Hit {
+        public float x0, y0, x1, y1;
+        public Pos pos;
+        public ChordRest cr;
+        public Note note;
+        public int noteIdx = -1;
+    }
+
+    public static final class SystemInfo {
+        public float y, x0, x1;
+        public float[] staffY;
+        public int firstMeasure, lastMeasure;
+        public float top, bottom;
+    }
+
+    public static final class MeasureInfo {
+        public int system;
+        public float x, width;
+        /** First content x (after any clef/key/time signature at the measure start). */
+        public float contentX;
+        public int[] colTicks;
+        public float[] colX;
+    }
+
+    public final List<Item> items = new ArrayList<Item>();
+    public final List<Hit> hits = new ArrayList<Hit>();
+    public final List<SystemInfo> systems = new ArrayList<SystemInfo>();
+    public final List<MeasureInfo> measures = new ArrayList<MeasureInfo>();
+    public float width, height;
+
+    Item add(int kind) {
+        Item it = new Item();
+        it.kind = kind;
+        items.add(it);
+        return it;
+    }
+
+    /** X position of a tick in a measure (interpolating between columns). */
+    public float xAt(int measure, int tick) {
+        MeasureInfo mi = measures.get(measure);
+        if (mi.colTicks.length == 0) return mi.contentX;
+        for (int i = 0; i < mi.colTicks.length; i++) {
+            if (mi.colTicks[i] == tick) return mi.colX[i];
+            if (mi.colTicks[i] > tick) {
+                if (i == 0) return mi.colX[0];
+                float f = (tick - mi.colTicks[i - 1]) / (float) (mi.colTicks[i] - mi.colTicks[i - 1]);
+                return mi.colX[i - 1] + f * (mi.colX[i] - mi.colX[i - 1]);
+            }
+        }
+        return mi.colX[mi.colX.length - 1];
+    }
+}
