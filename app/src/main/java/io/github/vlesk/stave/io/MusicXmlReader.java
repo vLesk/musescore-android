@@ -14,6 +14,7 @@ import io.github.vlesk.stave.model.Part;
 import io.github.vlesk.stave.model.Pitch;
 import io.github.vlesk.stave.model.Rest;
 import io.github.vlesk.stave.model.Score;
+import io.github.vlesk.stave.model.Syllables;
 import io.github.vlesk.stave.model.ScoreEdit;
 import io.github.vlesk.stave.model.Staff;
 import io.github.vlesk.stave.model.StaffMeasure;
@@ -399,6 +400,10 @@ public final class MusicXmlReader {
                                 String syl = Xml.text(ly, "syllabic");
                                 if (txt != null && syl != null && (syl.equals("begin") || syl.equals("middle"))) txt += "-";
                                 c.lyric = txt;
+                                Element ext = Xml.child(ly, "extend");
+                                if (ext != null && !"stop".equals(ext.getAttribute("type")) && !"continue".equals(ext.getAttribute("type"))) {
+                                    res.melismaExtends.add(c);
+                                }
                                 break;
                             }
                         }
@@ -516,6 +521,7 @@ public final class MusicXmlReader {
                 }
             }
         }
+        Syllables.resolveExtends(s, res.melismaExtends);
         return res;
     }
 

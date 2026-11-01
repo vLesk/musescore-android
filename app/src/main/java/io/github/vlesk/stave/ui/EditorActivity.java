@@ -397,7 +397,7 @@ public final class EditorActivity extends Activity implements ScoreView.Listener
     /**
      * The bar shown while typing lyrics. It is docked directly above the keyboard, where the thumbs
      * are, and is tinted so it reads as its own mode. It holds previous/next note, a hyphen key
-     * (phone keyboards bury it) and a standard Done button that leaves lyric entry.
+     * and an underscore key for extender lines (phone keyboards bury both), and a Done button.
      */
     private void buildLyricBar() {
         lyricBar = Ui.row(this);
@@ -410,6 +410,7 @@ public final class EditorActivity extends Activity implements ScoreView.Listener
         mode.setContentDescription("Lyric entry");
         mode.setPadding(t.dp(4), 0, t.dp(8), 0);
         lyricBar.addView(mode, Ui.lin(t.dp(36), t.dp(24)));
+        if (getResources().getConfiguration().screenWidthDp < 360) mode.setVisibility(View.GONE);
         ImageButton prev = Ui.icon(this, t, R.drawable.ic_chevron_left, "Previous note", new View.OnClickListener() {
             @Override
             public void onClick(View v) {
@@ -424,6 +425,7 @@ public final class EditorActivity extends Activity implements ScoreView.Listener
         hyphen.setBackground(Ui.rippleRound(t, android.graphics.Color.TRANSPARENT, 24));
         hyphen.setClickable(true);
         hyphen.setContentDescription("Hyphen, then next note");
+        if (Build.VERSION.SDK_INT >= 26) hyphen.setTooltipText("Hyphen");
         hyphen.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
@@ -432,6 +434,20 @@ public final class EditorActivity extends Activity implements ScoreView.Listener
             }
         });
         lyricBar.addView(hyphen, Ui.lin(t.dp(48), t.dp(48)));
+        TextView underscore = Ui.text(this, "_", 24, t.onPrimaryContainer, true);
+        underscore.setGravity(Gravity.CENTER);
+        underscore.setBackground(Ui.rippleRound(t, android.graphics.Color.TRANSPARENT, 24));
+        underscore.setClickable(true);
+        underscore.setContentDescription("Extender line (melisma), then next note");
+        if (Build.VERSION.SDK_INT >= 26) underscore.setTooltipText("Extender line (melisma)");
+        underscore.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                st.lyricType("_");
+                refresh();
+            }
+        });
+        lyricBar.addView(underscore, Ui.lin(t.dp(48), t.dp(48)));
         ImageButton next = Ui.icon(this, t, R.drawable.ic_chevron_right, "Next note", new View.OnClickListener() {
             @Override
             public void onClick(View v) {
@@ -442,20 +458,27 @@ public final class EditorActivity extends Activity implements ScoreView.Listener
         next.setImageTintList(android.content.res.ColorStateList.valueOf(t.onPrimaryContainer));
         lyricBar.addView(next);
         lyricBar.addView(new View(this), Ui.lin(0, 1, 1f));
-        TextView exit = Ui.text(this, getString(R.string.done), 15, t.onPrimary, true);
-        exit.setGravity(Gravity.CENTER);
-        exit.setPadding(t.dp(18), 0, t.dp(18), 0);
-        exit.setBackground(Ui.rippleRound(t, t.primary, 20));
-        exit.setClickable(true);
-        exit.setContentDescription(getString(R.string.done) + ", leave lyric entry");
-        exit.setOnClickListener(new View.OnClickListener() {
+        // a standard Done button: tick and label on a filled pill
+        LinearLayout done = Ui.row(this);
+        done.setBackground(Ui.rippleRound(t, t.primary, 20));
+        done.setPadding(t.dp(14), 0, t.dp(18), 0);
+        done.setClickable(true);
+        done.setContentDescription(getString(R.string.done) + ", leave lyric entry");
+        android.widget.ImageView tick = new android.widget.ImageView(this);
+        tick.setImageResource(R.drawable.ic_check);
+        tick.setImageTintList(android.content.res.ColorStateList.valueOf(t.onPrimary));
+        done.addView(tick, Ui.lin(t.dp(20), t.dp(20)));
+        TextView doneLabel = Ui.text(this, getString(R.string.done), 15, t.onPrimary, true);
+        doneLabel.setPadding(t.dp(8), 0, 0, 0);
+        done.addView(doneLabel);
+        done.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
                 st.endLyric();
                 refresh();
             }
         });
-        lyricBar.addView(exit, Ui.lin(-2, t.dp(40)));
+        lyricBar.addView(done, Ui.lin(-2, t.dp(40)));
         lyricBar.setVisibility(View.GONE);
         root.addView(lyricBar, Ui.frame(-1, t.dp(LYRIC_BAR_DP), Gravity.BOTTOM));
     }
@@ -1065,7 +1088,7 @@ public final class EditorActivity extends Activity implements ScoreView.Listener
     }
 
     private String statusText() {
-        if (st.lyricEdit) return "Lyric entry \u00b7 Space or - : next note \u00b7 tap a note to jump";
+        if (st.lyricEdit) return "Lyric entry \u00b7 Space or - : next note \u00b7 _ : extender line";
         StringBuilder sb = new StringBuilder();
         if (st.inputMode && st.cursor != null) {
             sb.append(getString(R.string.note_input)).append(" · ");
@@ -1806,7 +1829,8 @@ public final class EditorActivity extends Activity implements ScoreView.Listener
     /** Keys while typing a lyric. Returns false for shortcuts (Ctrl/Alt/Meta), which keep their meaning. */
     private boolean lyricKey(int keyCode, KeyEvent e) {
         if (keyCode == KeyEvent.KEYCODE_MINUS && e.isCtrlPressed()) {
-            st.lyricInsertLiteral('-'); // MuseScore: Ctrl+- is a hyphen inside the syllable, with no jump
+            // MuseScore: Ctrl+- and Ctrl+Shift+_ type a hyphen or underscore inside the syllable, with no jump
+            st.lyricInsertLiteral(e.isShiftPressed() ? '_' : '-');
             return true;
         }
         if (e.isCtrlPressed() || e.isAltPressed() || e.isMetaPressed()) return false;

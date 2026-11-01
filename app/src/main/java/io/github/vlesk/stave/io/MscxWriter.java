@@ -315,6 +315,7 @@ public final class MscxWriter {
                     x.open("Lyrics");
                     String syl = Syllables.syllabic(s, m, st, v, i);
                     if (!syl.equals("single")) x.tag("syllabic", syl);
+                    if (c.melisma > 0) x.tag("ticks_f", Syllables.fraction(Syllables.melismaTicks(s, m, st, v, i)));
                     x.tag("text", Syllables.text(c.lyric));
                     x.close();
                 }

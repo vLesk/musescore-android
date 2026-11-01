@@ -17,6 +17,7 @@ import io.github.vlesk.stave.model.Score;
 import io.github.vlesk.stave.model.ScoreEdit;
 import io.github.vlesk.stave.model.Staff;
 import io.github.vlesk.stave.model.StaffMeasure;
+import io.github.vlesk.stave.model.Syllables;
 import io.github.vlesk.stave.model.Tuplet;
 import io.github.vlesk.stave.model.Voice;
 
@@ -44,6 +45,10 @@ public final class MscxReader {
     public static final class Result {
         public Score score;
         public final List<String> warnings = new ArrayList<String>();
+        /** Melisma lengths read from the file (MuseScore ticks), resolved once the score is complete. */
+        final java.util.Map<ChordRest, Integer> melismaTicks = new java.util.IdentityHashMap<ChordRest, Integer>();
+        /** MusicXML lyrics with an &lt;extend/&gt;, resolved once the score is complete. */
+        final java.util.Set<ChordRest> melismaExtends = java.util.Collections.newSetFromMap(new java.util.IdentityHashMap<ChordRest, Boolean>());
     }
 
     private static final class TieRef {
@@ -247,6 +252,7 @@ public final class MscxReader {
             if (start != null) start.tieForward = true;
         }
         if (s.title == null || s.title.isEmpty()) s.title = "Untitled score";
+        Syllables.resolveMelismaTicks(s, res.melismaTicks);
         return res;
     }
 
@@ -407,6 +413,10 @@ public final class MscxReader {
                             String syl = Xml.text(le, "syllabic");
                             if (txt != null && syl != null && (syl.equals("begin") || syl.equals("middle"))) txt = txt + "-";
                             c.lyric = txt;
+                            // melisma length: ticks_f (a fraction of a whole note) since MuseScore 3.x, ticks before
+                            String tf = Xml.text(le, "ticks_f");
+                            int mt = tf != null ? Syllables.parseFraction(tf) : Xml.intText(le, "ticks", 0);
+                            if (mt > 0) res.melismaTicks.put(c, mt);
                         }
                         for (Element ae : Xml.children(el, "Articulation")) {
                             String a = Articulation.fromMscx(Xml.text(ae, "subtype"));

@@ -347,8 +347,8 @@ public class ModelTests {
             check(es.lyricEdit && es.selPos.tick == 960, "space moves to the next note");
             check(!es.lyricNext() && es.lyricEdit && es.selPos.tick == 960, "at the last note, nothing moves and the mode stays");
             es.lyricType("-");
-            check(es.lyricEdit && es.selPos.tick == 960 && "-".equals(lyricAt(es, c3)), "a hyphen at the start of a syllable is plain text");
-            es.lyricBackspace();
+            check(es.lyricEdit && es.selPos.tick == 960 && "".equals(lyricAt(es, c3)) && "lo".equals(lyricAt(es, b)),
+                    "a hyphen on an empty last syllable has nothing to connect to");
             es.lyricBackspace();
             check(es.lyricEdit && es.selPos.tick == 480 && "lo".equals(lyricAt(es, b)), "backspace on an empty syllable goes back");
             es.lyricType("-");
@@ -382,6 +382,86 @@ public class ModelTests {
             start = es.lyricStartPos();
             check(start != null && start.tick == 480, "starts at the selected chord");
             check(new io.github.vlesk.stave.edit.EditorState(pianoScore()).lyricStartPos() == null, "no chords: no start");
+        }
+
+        // melisma (extender line) and hyphen extension, typed as in MuseScore
+        {
+            io.github.vlesk.stave.edit.EditorState es = new io.github.vlesk.stave.edit.EditorState(pianoScore());
+            es.startInput();
+            es.setDuration(Duration.QUARTER);
+            for (int k = 0; k < 6; k++) es.enterPitch(60 + k, Integer.MIN_VALUE);
+            es.stopInput();
+            Pos[] n = {new Pos(0, 0, 0, 0), new Pos(0, 0, 0, 480), new Pos(0, 0, 0, 960), new Pos(0, 0, 0, 1440),
+                    new Pos(1, 0, 0, 0), new Pos(1, 0, 0, 480)};
+            es.beginLyric(n[0]);
+            es.lyricType("Glo_");
+            check(es.selPos.tick == 480 && ScoreEdit.elementAt(es.score, n[0]).melisma == 1, "_ on a syllable: one-note melisma, next note");
+            es.lyricType("__");
+            check(es.selPos.tick == 1440 && ScoreEdit.elementAt(es.score, n[0]).melisma == 3 && lyricAt(es, n[1]) == null && lyricAt(es, n[2]) == null,
+                    "each further _ holds the syllable over one more note: " + ScoreEdit.elementAt(es.score, n[0]).melisma);
+            es.lyricType("ri-a");
+            es.endLyric();
+            check("Glo".equals(lyricAt(es, n[0])) && "ri-".equals(lyricAt(es, n[3])) && "a".equals(lyricAt(es, n[4])), "text after the melisma");
+            // a new syllable on a held note shortens the melisma
+            es.beginLyric(n[2]);
+            es.lyricType("x");
+            es.endLyric();
+            check(ScoreEdit.elementAt(es.score, n[0]).melisma == 2, "melisma shortened to end before the new syllable");
+            es.undo();
+            check(ScoreEdit.elementAt(es.score, n[0]).melisma == 3 && lyricAt(es, n[2]) == null, "undo restores the melisma");
+
+            // layout: the held syllable is left-aligned, the line runs to the last held notehead
+            DisplayList dl = Layout.layout(es.score, new TextMetrics() {
+                public float width(String t, int font, float sizeSp) {
+                    return t.length() * sizeSp * 0.5f;
+                }
+            }, new Layout.Options());
+            float head = io.github.vlesk.stave.engrave.Sym.width(io.github.vlesk.stave.engrave.Sym.noteheadBlack);
+            DisplayList.Hit glo = null;
+            for (DisplayList.Hit h : dl.lyricHits) if ("Glo".equals(h.cr.lyric)) glo = h;
+            check(glo != null && Math.abs(glo.x0 - dl.xAt(0, 0)) < 1e-3f, "a melisma syllable is left-aligned with its notehead");
+            int lines = 0;
+            for (DisplayList.Item it : dl.items) {
+                if (it.kind == DisplayList.LINE && it.y == it.y2 && Math.abs(it.y - (glo.baseline - 0.05f)) < 1e-3f) {
+                    lines++;
+                    check(Math.abs(it.x - (glo.x1 + 0.2f)) < 1e-3f && Math.abs(it.x2 - (dl.xAt(0, 960) + head)) < 1e-3f,
+                            "extender from the syllable to the last held notehead: " + it.x + ".." + it.x2);
+                }
+            }
+            check(lines == 1, "one extender line: " + lines);
+
+            // files: ticks_f in .mscx, <extend/> in MusicXML, both read back
+            String mscx = MscxWriter.write(es.score);
+            check(mscx.contains("<ticks_f>1/2</ticks_f>"), "mscx melisma length");
+            Score back = MscxReader.read(mscx.getBytes("UTF-8")).score;
+            check(ScoreEdit.elementAt(back, n[0]).melisma == 3, "mscx melisma read back: " + ScoreEdit.elementAt(back, n[0]).melisma);
+            String melXml = MusicXmlWriter.write(es.score);
+            check(melXml.contains("<extend/>"), "musicxml extend");
+            Score backXml = MusicXmlReader.read(melXml.getBytes("UTF-8")).score;
+            check(ScoreEdit.elementAt(backXml, n[0]).melisma == 3, "musicxml melisma read back: " + ScoreEdit.elementAt(backXml, n[0]).melisma);
+
+            // "-" on an empty syllable carries the previous syllable's hyphen over this note
+            es.beginLyric(n[3]);
+            es.lyricBackspace();
+            es.lyricBackspace();
+            es.lyricBackspace();
+            es.lyricType("bo-");
+            check(es.selPos.measure == 1 && es.selPos.tick == 0, "after bo- the next note");
+            es.lyricBackspace();
+            check(es.selPos.measure == 1 && "".equals(lyricAt(es, n[4])), "syllable cleared");
+            es.lyricType("-");
+            check(es.selPos.measure == 1 && es.selPos.tick == 480 && lyricAt(es, n[4]) == null && "bo-".equals(lyricAt(es, n[3])),
+                    "- on an empty syllable skips the note and keeps the hyphen going");
+            es.lyricType("dy");
+            es.endLyric();
+            String hyMscx = MscxWriter.write(es.score);
+            check(hyMscx.contains("<syllabic>begin</syllabic>") && hyMscx.contains("<syllabic>end</syllabic>"), "hyphen across the skipped note");
+            // "_" after a hyphenated syllable ends the word there and holds it instead
+            es.beginLyric(n[4]);
+            es.lyricType("_");
+            es.endLyric();
+            check("bo".equals(lyricAt(es, n[3])) && ScoreEdit.elementAt(es.score, n[3]).melisma == 2 && lyricAt(es, n[4]) == null,
+                    "_ turns the hyphen into an extender: " + lyricAt(es, n[3]) + " " + ScoreEdit.elementAt(es.score, n[3]).melisma);
         }
 
         // lyric positions are in page coordinates: below their staff, not at the top of the page

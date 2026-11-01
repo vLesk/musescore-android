@@ -14,6 +14,12 @@ public abstract class ChordRest {
     public String chordSymbol;
     /** Lyric syllable for verse 1 (null = none). */
     public String lyric;
+    /**
+     * Melisma (extender line, entered with "_" as in MuseScore): the number of notes the syllable is
+     * held over, counting its own. 0 = none; 1 = only its own note (MuseScore's one-note melisma, drawn
+     * as a short line); n = the line runs to the (n-1)-th following chord in the voice (rests skipped).
+     */
+    public int melisma;
     /** Articulation ids, see {@link Articulation}. */
     public final List<String> articulations = new ArrayList<String>();
     /** Free staff text above this position (expression / technique text). */
@@ -35,6 +41,7 @@ public abstract class ChordRest {
         o.dynamic = dynamic;
         o.chordSymbol = chordSymbol;
         o.lyric = lyric;
+        o.melisma = melisma;
         o.articulations.addAll(articulations);
         o.staffText = staffText;
     }
@@ -47,6 +54,7 @@ public abstract class ChordRest {
         dynamic = null;
         chordSymbol = null;
         lyric = null;
+        melisma = 0;
         staffText = null;
         articulations.clear();
     }

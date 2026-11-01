@@ -12,6 +12,7 @@ import io.github.vlesk.stave.model.Rest;
 import io.github.vlesk.stave.model.Score;
 import io.github.vlesk.stave.model.ScoreEdit;
 import io.github.vlesk.stave.model.StaffMeasure;
+import io.github.vlesk.stave.model.Syllables;
 import io.github.vlesk.stave.model.Voice;
 
 import java.util.ArrayList;
@@ -82,6 +83,7 @@ public final class EditorState {
         if (undo.isEmpty()) return;
         redo.add(score);
         score = undo.remove(undo.size() - 1);
+        dropEmptyLyrics(score);
         changed();
     }
 
@@ -90,6 +92,7 @@ public final class EditorState {
         if (redo.isEmpty()) return;
         undo.add(score);
         score = redo.remove(redo.size() - 1);
+        dropEmptyLyrics(score);
         changed();
     }
 
@@ -551,6 +554,25 @@ public final class EditorState {
         changed();
     }
 
+    /**
+     * Undo snapshots are taken while a syllable is being typed, so they can hold its empty
+     * placeholder; restored scores must not keep it (it would reserve an empty lyric line).
+     */
+    private static void dropEmptyLyrics(Score s) {
+        for (Measure m : s.measures) {
+            for (StaffMeasure sm : m.staves) {
+                for (Voice v : sm.voices) {
+                    for (ChordRest cr : v.items) {
+                        if (cr.lyric != null && cr.lyric.trim().isEmpty()) {
+                            cr.lyric = null;
+                            cr.melisma = 0;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     // ------------------------------------------------------------------ inline lyric entry
 
     /**
@@ -581,6 +603,7 @@ public final class EditorState {
         if (c == null || c.lyric == null) return;
         String t = c.lyric.trim();
         c.lyric = t.isEmpty() ? null : t;
+        if (c.lyric == null) c.melisma = 0;
     }
 
     /** Removes the text an input method is still composing. */
@@ -667,26 +690,129 @@ public final class EditorState {
 
     /**
      * Types text into the lyric, as in MuseScore: a space or newline ends the syllable and moves to
-     * the next note; a hyphen after a syllable is added to it and also moves to the next note (so
-     * "hel-lo" fills two notes). A hyphen at the start of a syllable is an ordinary character.
+     * the next note; a hyphen after a syllable is added to it and also moves on (so "hel-lo" fills
+     * two notes); an underscore holds the syllable over the next note with an extender line
+     * (melisma). On an empty syllable, a hyphen or underscore extends the previous syllable over
+     * this note instead.
      */
     public void lyricType(CharSequence text) {
         if (!lyricEdit || text == null) return;
         lyricDropComposing();
         for (int i = 0; i < text.length(); i++) {
             char ch = text.charAt(i);
-            if (ch == ' ' || ch == '\n') {
-                lyricMove(true);
-            } else if (!Character.isISOControl(ch)) {
-                Chord c = lyricChord();
-                if (c == null) return;
-                lyricBeforeChange();
-                String base = c.lyric == null ? "" : c.lyric;
-                c.lyric = base + ch;
-                changed();
-                if (ch == '-' && !base.isEmpty()) lyricMove(true);
+            if (ch == ' ' || ch == '\n') lyricMove(true);
+            else if (ch == '_') lyricUnderscore();
+            else if (ch == '-') lyricHyphen();
+            else if (!Character.isISOControl(ch)) lyricAppend(ch);
+        }
+    }
+
+    private void lyricAppend(char ch) {
+        Chord c = lyricChord();
+        if (c == null) return;
+        lyricBeforeChange();
+        String base = c.lyric == null ? "" : c.lyric;
+        if (base.isEmpty()) lyricClaim();
+        c.lyric = base + ch;
+        changed();
+    }
+
+    /** A new syllable on this note ends any melisma that was holding it (MuseScore does the same). */
+    private void lyricClaim() {
+        Pos from = lyricPreviousPos(selPos);
+        if (from == null) return;
+        ChordRest f = ScoreEdit.elementAt(score, from);
+        int upToHere = lyricChordsBetween(from, selPos);
+        if (f.melisma >= upToHere) f.melisma = Math.max(1, upToHere - 1);
+    }
+
+    /** "-": after a syllable, hyphenate it and move on; on an empty one, carry the previous hyphen over this note. */
+    private void lyricHyphen() {
+        Chord c = lyricChord();
+        if (c == null) return;
+        String base = c.lyric == null ? "" : c.lyric;
+        if (!base.isEmpty()) {
+            lyricBeforeChange();
+            c.lyric = base + '-';
+            c.melisma = 0; // a hyphenated syllable continues with dashes, not an extender line
+            changed();
+            lyricMove(true);
+            return;
+        }
+        Pos from = lyricPreviousPos(selPos);
+        if (from == null) {
+            lyricInsertLiteral('-');
+            return;
+        }
+        if (lyricNextChordPos(selPos) == null) return;
+        lyricBeforeChange();
+        ChordRest f = ScoreEdit.elementAt(score, from);
+        if (!Syllables.hyphenated(f.lyric)) f.lyric = f.lyric + "-";
+        f.melisma = 0;
+        c.lyric = null;
+        changed();
+        lyricMove(true);
+    }
+
+    /**
+     * "_": hold the syllable over this note and move to the next one, as MuseScore's addMelisma. On
+     * the syllable's own note it starts a one-note melisma; on an empty syllable it extends the
+     * previous syllable up to this note. The held syllable loses its hyphen (a word ends there).
+     */
+    private void lyricUnderscore() {
+        Chord c = lyricChord();
+        if (c == null) return;
+        lyricBeforeChange();
+        boolean empty = c.lyric == null || c.lyric.trim().isEmpty();
+        Pos from = empty ? lyricPreviousPos(selPos) : selPos.copy();
+        Pos next = lyricNextChordPos(selPos);
+        if (from != null) {
+            ChordRest f = ScoreEdit.elementAt(score, from);
+            if (Syllables.hyphenated(f.lyric)) f.lyric = Syllables.text(f.lyric);
+            if (!empty) {
+                if (next != null) f.melisma = Math.max(f.melisma, 1);
+            } else {
+                f.melisma = lyricChordsBetween(from, selPos);
             }
         }
+        if (next == null) {
+            changed();
+            return;
+        }
+        if (empty) c.lyric = null;
+        changed();
+        lyricMove(true);
+    }
+
+    /** The nearest earlier chord in the voice with a (non-empty) lyric. */
+    private Pos lyricPreviousPos(Pos p) {
+        Pos q = p;
+        while ((q = ScoreEdit.prev(score, q)) != null) {
+            ChordRest cr = ScoreEdit.elementAt(score, q);
+            if (cr instanceof Chord && cr.lyric != null && !cr.lyric.trim().isEmpty()) return q;
+        }
+        return null;
+    }
+
+    /** The next chord in the voice (rests skipped), or null. */
+    private Pos lyricNextChordPos(Pos p) {
+        Pos q = p;
+        while ((q = ScoreEdit.next(score, q)) != null) {
+            if (ScoreEdit.elementAt(score, q) instanceof Chord) return q;
+        }
+        return null;
+    }
+
+    /** Number of chords from a to b, both included (rests not counted). */
+    private int lyricChordsBetween(Pos a, Pos b) {
+        int n = 0;
+        Pos q = a;
+        while (q != null) {
+            if (ScoreEdit.elementAt(score, q) instanceof Chord) n++;
+            if (q.measure == b.measure && q.tick == b.tick) break;
+            q = ScoreEdit.next(score, q);
+        }
+        return n;
     }
 
     /** Types a character as plain text (a literal hyphen, say), without moving to the next note. */
@@ -704,7 +830,7 @@ public final class EditorState {
         Chord c = lyricChord();
         if (!lyricEdit || c == null) return;
         String t = text == null ? "" : text.toString();
-        if (t.indexOf(' ') >= 0 || t.indexOf('\n') >= 0 || t.indexOf('-') >= 0) {
+        if (t.indexOf(' ') >= 0 || t.indexOf('\n') >= 0 || t.indexOf('-') >= 0 || t.indexOf('_') >= 0) {
             lyricType(t);
             return;
         }

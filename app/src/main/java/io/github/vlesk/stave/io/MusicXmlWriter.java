@@ -311,6 +311,7 @@ public final class MusicXmlWriter {
                     x.open("lyric", "number", "1");
                     x.tag("syllabic", syl);
                     x.tag("text", txt);
+                    if (c.melisma > 0) x.empty("extend"); // as MuseScore exports a melisma
                     x.close();
                 }
                 x.close();

@@ -127,6 +127,8 @@ public final class Layout {
     private static final float DASH_SPACE = DASH_MIN + 2 * DASH_PAD;
     /** Dashes sit half the x-height above the baseline (lyricsDashYposRatio 0.5); Edwin's x-height is about 0.466 em. */
     private static final float DASH_RAISE = 0.5f * 0.466f * LYRIC_SIZE;
+    /** Extender (melisma) line: lyricsLineThickness, lyricsMelismaPad, lyricsMelismaMinLength. */
+    private static final float MELISMA_THICKNESS = 0.1f, MELISMA_PAD = 0.2f, MELISMA_MIN = 1.0f;
 
     private Layout(Score s, TextMetrics tm, Options o) {
         this.s = s;
@@ -463,21 +465,22 @@ public final class Layout {
                             if (accs > 0) acc = Math.max(acc, 0.3f + Math.min(accs, 3) * 1.15f);
                             if (second) right += HEAD_W;
                             if (ch.lyric != null && v.starts()[idx] == c.tick) {
-                                // lyrics are centred on their notes, so two neighbours need half of each
-                                // width plus MuseScore's gap (more when a dash has to fit between them)
-                                float lw = lyricWidth(ch.lyric);
+                                // keep neighbouring lyrics apart by MuseScore's gap (more when a dash has to fit
+                                // between them), using where each one really sits: centred, or left-aligned
+                                // when it carries a melisma
+                                float[] ext = lyricExtent(ch);
                                 ChordRest nx = nextInVoice(m, st, vi, idx);
                                 float need;
                                 if (nx instanceof Chord && nx.lyric != null) {
                                     float gap = Syllables.hyphenated(ch.lyric) ? DASH_SPACE : LYRIC_MIN_DISTANCE;
-                                    need = lw / 2 + lyricWidth(nx.lyric) / 2 + gap;
+                                    need = ext[1] - lyricExtent(nx)[0] + gap;
                                 } else {
-                                    need = HEAD_W / 2 + lw / 2 + LYRIC_MIN_DISTANCE;
+                                    need = ext[1] + LYRIC_MIN_DISTANCE;
                                 }
                                 // the last note of a bar: the next one follows the bar's end and start padding
                                 if (idx + 1 >= v.items.size()) need -= 1.5f;
                                 lyricW = Math.max(lyricW, need);
-                                if (c.tick == 0) lyricLead = Math.max(lyricLead, lw / 2 - HEAD_W / 2 - 1.0f);
+                                if (c.tick == 0) lyricLead = Math.max(lyricLead, -ext[0] - 1.0f);
                             }
                         }
                         if (cr.chordSymbol != null) {
@@ -588,7 +591,7 @@ public final class Layout {
             sysIdx++;
         }
         drawTies();
-        drawLyricDashes();
+        drawLyricLines();
         if (o.pageHeight > 0) dl.height = (page + 1) * o.pageHeight;
         else dl.height = y + 2;
     }
@@ -1422,11 +1425,12 @@ public final class Layout {
                         }
                     }
                     if (cr.lyric != null && cr instanceof Chord) {
-                        // MuseScore: centred on the notehead; leading and trailing punctuation hangs outside
-                        // the centring (lyricsAlignVerseNumber). The hyphen marker is drawn as dashes later.
+                        // MuseScore: centred on the notehead, or left-aligned when it carries a melisma;
+                        // leading and trailing punctuation hangs outside (lyricsAlignVerseNumber). The
+                        // hyphen marker and the melisma are drawn as dashes / an extender line later.
                         String shown = Syllables.text(cr.lyric);
                         float w = tm.width(shown, TextMetrics.FONT_TEXT, LYRIC_SIZE);
-                        float lx = x + HEAD_W / 2 - w / 2 - lyricCenterAdjust(shown) / 2;
+                        float lx = x + lyricExtent(cr)[0];
                         DisplayList.Item it = text(g.items, shown, TextMetrics.FONT_TEXT, LYRIC_SIZE, lx, lyrY, DisplayList.ALIGN_LEFT);
                         it.owner = cr;
                         g.ext(lyrY - 1.6f, lyrY + 0.6f);
@@ -1653,10 +1657,6 @@ public final class Layout {
 
     // --------------------------------------------------------------------------- lyrics
 
-    private float lyricWidth(String lyric) {
-        return tm.width(Syllables.text(lyric), TextMetrics.FONT_TEXT, LYRIC_SIZE);
-    }
-
     /** The next chord or rest in a voice, continuing into the next bar. */
     private ChordRest nextInVoice(int m, int st, int v, int idx) {
         Voice voice = s.measures.get(m).staves.get(st).voices[v];
@@ -1666,11 +1666,19 @@ public final class Layout {
         return nv.items.isEmpty() ? null : nv.items.get(0);
     }
 
+    /** True if the syllable carries an extender line (a hyphenated one continues with dashes instead). */
+    private static boolean hasMelisma(ChordRest cr) {
+        return cr.melisma > 0 && !Syllables.hyphenated(cr.lyric);
+    }
+
     /**
-     * MuseScore centres only the letters: leading and trailing non-letters (verse numbers,
-     * punctuation) are excluded. Returns leadingWidth - trailingWidth; the text moves left by half.
+     * Where a chord's lyric sits relative to the left edge of its notehead: {left, right}. As in
+     * MuseScore, it is centred on the notehead, or left-aligned with it when it carries a melisma
+     * (lyricsMelismaAlign); only the letters count, leading and trailing punctuation hangs outside.
      */
-    private float lyricCenterAdjust(String t) {
+    private float[] lyricExtent(ChordRest cr) {
+        String t = Syllables.text(cr.lyric);
+        float w = tm.width(t, TextMetrics.FONT_TEXT, LYRIC_SIZE);
         int first = -1, last = -1;
         for (int i = 0; i < t.length(); i++) {
             if (Character.isLetter(t.charAt(i))) {
@@ -1678,10 +1686,10 @@ public final class Layout {
                 last = i;
             }
         }
-        if (first < 0) return 0;
         float lead = first > 0 ? tm.width(t.substring(0, first), TextMetrics.FONT_TEXT, LYRIC_SIZE) : 0;
-        float trail = last < t.length() - 1 ? tm.width(t.substring(last + 1), TextMetrics.FONT_TEXT, LYRIC_SIZE) : 0;
-        return lead - trail;
+        float trail = first >= 0 && last < t.length() - 1 ? tm.width(t.substring(last + 1), TextMetrics.FONT_TEXT, LYRIC_SIZE) : 0;
+        float left = hasMelisma(cr) ? -lead : HEAD_W / 2 - w / 2 - (lead - trail) / 2;
+        return new float[]{left, left + w};
     }
 
     /**
@@ -1690,10 +1698,14 @@ public final class Layout {
      * the next, and its dashes are centred in it. Across a line break the line ends at the end of
      * the system and starts again before the next syllable.
      */
-    private void drawLyricDashes() {
+    private void drawLyricLines() {
         Map<ChordRest, DisplayList.Hit> at = new IdentityHashMap<ChordRest, DisplayList.Hit>();
         for (DisplayList.Hit h : dl.lyricHits) at.put(h.cr, h);
         for (DisplayList.Hit h : dl.lyricHits) {
+            if (hasMelisma(h.cr)) {
+                melisma(h);
+                continue;
+            }
             if (!Syllables.hyphenated(h.cr.lyric)) continue;
             Voice voice = s.measures.get(h.pos.measure).staves.get(h.pos.staff).voices[h.pos.voice];
             ChordRest next = Syllables.next(s, h.pos.measure, h.pos.staff, h.pos.voice, voice.indexAt(h.pos.tick));
@@ -1708,6 +1720,40 @@ public final class Layout {
                 dashes(dl.measures.get(b.firstMeasure).contentX - 0.5f, n.x0 - DASH_PAD, n.baseline - DASH_RAISE, true);
             }
         }
+    }
+
+    /**
+     * The extender line of a melisma, as MuseScore lays it out (layoutMelismaLine): on the baseline,
+     * from just after the syllable to the right edge of the last notehead it is held over. A line
+     * shorter than the minimum length is left out, except for a one-note melisma, which is drawn at
+     * the minimum length (MuseScore shows it that way while the line is being typed). Across a line
+     * break it runs to the end of the system and continues on the next one.
+     */
+    private void melisma(DisplayList.Hit h) {
+        int st = h.pos.staff, v = h.pos.voice;
+        Voice voice = s.measures.get(h.pos.measure).staves.get(st).voices[v];
+        int[] end = Syllables.melismaEnd(s, h.pos.measure, st, v, voice.indexAt(h.pos.tick));
+        int endTick = s.measures.get(end[0]).staves.get(st).voices[v].starts()[end[1]];
+        float endX = dl.xAt(end[0], endTick) + HEAD_W;
+        boolean oneNote = h.cr.melisma == 1;
+        int sa = dl.measures.get(h.pos.measure).system, sb = dl.measures.get(end[0]).system;
+        float y = h.baseline - MELISMA_THICKNESS / 2;
+        if (sa == sb) {
+            extender(h.x1 + MELISMA_PAD, endX, y, oneNote);
+        } else {
+            DisplayList.SystemInfo a = dl.systems.get(sa), b = dl.systems.get(sb);
+            extender(h.x1 + MELISMA_PAD, a.x1 - 0.5f, y, false);
+            float yb = b.staffY[st] + (y - a.staffY[st]);
+            extender(dl.measures.get(b.firstMeasure).contentX - 0.3f, endX, yb, false);
+        }
+    }
+
+    private void extender(float x0, float x1, float y, boolean force) {
+        if (x1 - x0 < MELISMA_MIN - 0.05f) {
+            if (!force) return;
+            x1 = x0 + MELISMA_MIN;
+        }
+        line(dl.items, x0, y, x1, y, MELISMA_THICKNESS);
     }
 
     private void dashes(float x0, float x1, float y, boolean firstOnSystem) {
