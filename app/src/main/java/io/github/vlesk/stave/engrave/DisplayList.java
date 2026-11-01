@@ -33,6 +33,37 @@ public final class DisplayList {
         public ChordRest owner;
         public Note note;
         public int voice;
+
+        /**
+         * Whether any part of this item can reach the vertical band [y0, y1] (staff spaces),
+         * allowing {@code margin} for glyph and text extents around their anchor point.
+         * Uses the full vertical extent of lines, rectangles and polygons, so tall items such
+         * as system barlines, brackets and braces stay visible while their top or bottom is
+         * scrolled off screen.
+         */
+        public boolean intersects(float y0, float y1, float margin) {
+            float top, bottom;
+            switch (kind) {
+                case LINE:
+                case RECT:
+                case RECT_OUTLINE:
+                    top = Math.min(y, y2);
+                    bottom = Math.max(y, y2);
+                    break;
+                case POLY:
+                    top = Float.POSITIVE_INFINITY;
+                    bottom = Float.NEGATIVE_INFINITY;
+                    for (int k = 1; k < pts.length; k += 2) {
+                        top = Math.min(top, pts[k]);
+                        bottom = Math.max(bottom, pts[k]);
+                    }
+                    break;
+                default:
+                    top = bottom = y;
+                    break;
+            }
+            return bottom >= y0 - margin && top <= y1 + margin;
+        }
     }
 
     /** A tappable element. */

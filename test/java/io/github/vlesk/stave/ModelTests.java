@@ -9,6 +9,9 @@ import io.github.vlesk.stave.io.MusicXmlReader;
 import io.github.vlesk.stave.io.MusicXmlWriter;
 import io.github.vlesk.stave.model.*;
 
+import io.github.vlesk.stave.engrave.DisplayList;
+import io.github.vlesk.stave.engrave.Layout;
+import io.github.vlesk.stave.engrave.TextMetrics;
 import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.nio.file.Files;
@@ -235,6 +238,52 @@ public class ModelTests {
             check(es.score.measures.size() >= before - 2, "measures sane");
             while (es.canUndo()) es.undo();
             checkVoicesFit(es.score, "undo all");
+        }
+
+        // render culling: tall system items (system barline, bracket, brace) must stay visible
+        // while the top of their system is scrolled off screen
+        {
+            List<Part> ps = new ArrayList<Part>();
+            ps.add(Instruments.byId("piano").create());
+            ps.add(Instruments.byId("soprano").create());
+            ps.add(Instruments.byId("tenor").create());
+            ps.add(Instruments.byId("bass").create());
+            Score sc = Score.create("Cull", "", ps, 4, 4, 0, 100, 4);
+            Layout.Options lo = new Layout.Options();
+            lo.width = 40;
+            DisplayList dl = Layout.layout(sc, new TextMetrics() {
+                public float width(String t, int font, float sizeSp) {
+                    return t.length() * sizeSp * 0.5f;
+                }
+            }, lo);
+            DisplayList.SystemInfo si = dl.systems.get(0);
+            float top = si.staffY[0], bottom = si.staffY[si.staffY.length - 1] + 4;
+            check(bottom - top > 30, "cull test system is tall: " + (bottom - top));
+            // a viewport showing only the bottom of each tall item, far below its top
+            int tall = 0;
+            for (DisplayList.Item it : dl.items) {
+                float iTop, iBottom;
+                if (it.kind == DisplayList.LINE && it.x == it.x2) {
+                    iTop = Math.min(it.y, it.y2);
+                    iBottom = Math.max(it.y, it.y2);
+                } else if (it.kind == DisplayList.POLY) {
+                    iTop = Float.MAX_VALUE;
+                    iBottom = -Float.MAX_VALUE;
+                    for (int k = 1; k < it.pts.length; k += 2) {
+                        iTop = Math.min(iTop, it.pts[k]);
+                        iBottom = Math.max(iBottom, it.pts[k]);
+                    }
+                } else continue;
+                if (iBottom - iTop < 16) continue;
+                tall++;
+                check(it.intersects(iBottom - 2, iBottom, 2), "tall item visible from below: kind " + it.kind + " top " + iTop);
+            }
+            check(tall >= 3, "found system barline, bracket and brace: " + tall);
+            float v0 = bottom - 4, v1 = bottom + 2;
+            DisplayList.Item off = new DisplayList.Item();
+            off.kind = DisplayList.LINE;
+            off.y = off.y2 = top;
+            check(!off.intersects(v0, v1, 12), "far-off line culled");
         }
 
         // MuseScore's own test files

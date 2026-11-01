@@ -65,14 +65,12 @@ public final class ScoreRenderer implements TextMetrics {
     }
 
     /**
-     * Draws the items whose y lies within [y0, y1] (in staff spaces); sp is pixels per staff space.
+     * Draws the items that reach into [y0, y1] (in staff spaces); sp is pixels per staff space.
      */
     public void draw(Canvas c, DisplayList dl, float sp, float y0, float y1, Highlighter hl) {
         for (int i = 0; i < dl.items.size(); i++) {
             DisplayList.Item it = dl.items.get(i);
-            float iy = it.y;
-            if (it.kind == DisplayList.POLY) iy = it.pts[1];
-            if (iy < y0 - 12 || iy > y1 + 12) continue;
+            if (!it.intersects(y0, y1, 12)) continue;
             int col = hl != null ? hl.colorFor(it) : 0;
             if (col == 0) col = it.color == DisplayList.C_MUTED ? muted : (it.color == DisplayList.C_ACCENT ? accent : ink);
             switch (it.kind) {
