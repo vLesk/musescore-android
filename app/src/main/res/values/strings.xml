@@ -59,6 +59,7 @@
     <string name="sharp">Sharp</string>
     <string name="double_flat">Double flat</string>
     <string name="double_sharp">Double sharp</string>
+    <string name="respell">Respell (enharmonic)</string>
     <string name="up">Pitch up</string>
     <string name="down">Pitch down</string>
     <string name="octave_up">Octave up</string>

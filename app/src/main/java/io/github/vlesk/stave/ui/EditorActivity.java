@@ -783,6 +783,13 @@ public final class EditorActivity extends Activity implements ScoreView.Listener
                 }
             }));
         }
+        items.add(new Ui.PopupItem("⇆", false, getString(R.string.respell), false, new Runnable() {
+            @Override
+            public void run() {
+                st.respell();
+                refresh();
+            }
+        }));
         Ui.popupGroup(anchor, t, items);
     }
 
@@ -911,7 +918,7 @@ public final class EditorActivity extends Activity implements ScoreView.Listener
             @Override
             public void onClick(View v) {
                 if (st == null) return;
-                st.triplet = !st.triplet;
+                st.setTriplet(!st.triplet);
                 refresh();
             }
         });
@@ -958,6 +965,19 @@ public final class EditorActivity extends Activity implements ScoreView.Listener
                 }
             }), getString(accDesc[i])));
         }
+        // the piano spells by key; respell gets the other spellings (B natural / C flat, C sharp / D flat)
+        row.addView(Ui.labeled(this, t, Ui.glyphButton(this, t, "⇆", false, 20, getString(R.string.respell), new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                if (st == null) return;
+                if (!st.respell()) {
+                    snack.show(getString(R.string.nothing_selected));
+                    return;
+                }
+                previewSelected();
+                refresh();
+            }
+        }), "Respell"));
         chordBtn = Ui.icon(this, t, R.drawable.ic_add_box, getString(R.string.chord_mode), new View.OnClickListener() {
             @Override
             public void onClick(View v) {
@@ -1095,7 +1115,7 @@ public final class EditorActivity extends Activity implements ScoreView.Listener
             sb.append("m. ").append(st.score.measureNumber(Math.min(st.cursor.measure, st.score.measures.size() - 1)));
             sb.append(" · ").append(getString(R.string.voice, st.voice + 1));
             sb.append(" · ").append(Duration.label(st.durType, st.dots));
-            if (st.triplet) sb.append(" (3)");
+            if (st.triplet) sb.append(" · triplet of ").append(Duration.label(st.tripletUnit >= 0 ? st.tripletUnit : st.durType, 0).toLowerCase(java.util.Locale.ROOT)).append("s");
             return sb.toString();
         }
         if (st.selKind == EditorState.SEL_RANGE) {
@@ -1594,6 +1614,12 @@ public final class EditorActivity extends Activity implements ScoreView.Listener
                     }
                 }));
             }
+            accs.add(new PaletteView.Cell("⇆", false, "Respell", a.getString(R.string.respell), new Runnable() {
+                @Override
+                public void run() {
+                    if (!a.st.respell()) a.toast(a.getString(R.string.nothing_selected));
+                }
+            }));
             cats.add(accs);
 
             PaletteView.Category arts = new PaletteView.Category("Articulations");
@@ -2162,7 +2188,7 @@ public final class EditorActivity extends Activity implements ScoreView.Listener
                 + "A–G — enter note (Shift: add to chord)\n"
                 + "1–7 — 64th … whole (as in MuseScore), . — dot\n"
                 + "0 — rest,  + — tie,  T — triplet\n"
-                + "↑ ↓ — semitone,  Ctrl+↑ ↓ — octave\n"
+                + "↑ ↓ — semitone,  Ctrl+↑ ↓ — octave,  J — respell (C♯ ⇄ D♭)\n"
                 + "← → — previous / next\n"
                 + "Del / Backspace — delete\n"
                 + "Ctrl+Alt+1–4 — voice\n"
@@ -2255,7 +2281,10 @@ public final class EditorActivity extends Activity implements ScoreView.Listener
                         followCursor();
                         break;
                     case KeyEvent.KEYCODE_T:
-                        st.triplet = !st.triplet;
+                        st.setTriplet(!st.triplet);
+                        break;
+                    case KeyEvent.KEYCODE_J:
+                        st.respell();
                         break;
                     case KeyEvent.KEYCODE_DPAD_UP:
                         st.transpose(1);

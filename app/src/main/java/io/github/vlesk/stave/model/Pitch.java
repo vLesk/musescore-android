@@ -70,13 +70,27 @@ public final class Pitch {
         for (int tpc = TPC_MIN; tpc <= TPC_MAX; tpc++) {
             if (pitchClassOfTpc(tpc) != pc) continue;
             int d = Math.abs(tpc - center);
-            // prefer sharps in sharp keys / C, flats in flat keys on ties
-            if (d < bestDist || (d == bestDist && ((keyFifths >= 0) ? tpc > best : tpc < best))) {
+            // on a tie prefer fewer accidentals (C natural in E major, not B sharp; A natural in
+            // D flat major, not B double flat), then sharps in sharp keys and flats in flat keys
+            boolean tie = d == bestDist;
+            int fewer = Integer.compare(Math.abs(alter(tpc)), Math.abs(alter(best)));
+            if (d < bestDist || (tie && fewer < 0) || (tie && fewer == 0 && ((keyFifths >= 0) ? tpc > best : tpc < best))) {
                 best = tpc;
                 bestDist = d;
             }
         }
         return best;
+    }
+
+    /**
+     * The next spelling of the same pitch, cycling through the valid ones in line-of-fifths order
+     * (B ⇄ C♭ ⇄ A𝄪), as MuseScore's "Respell pitches" (J).
+     */
+    public static int nextSpelling(int tpc) {
+        for (int t = tpc + 12; t <= TPC_MAX; t += 12) if (validTpc(t)) return t;
+        int t = tpc;
+        while (t - 12 >= TPC_MIN) t -= 12;
+        return t;
     }
 
     /** Spelling with a forced alteration (from an accidental button); falls back to {@link #spell}. */

@@ -206,6 +206,17 @@ public final class ScoreEdit {
      * Long values are split across bar lines with ties. Returns the position after the new element.
      */
     public static Pos enter(Score s, Pos p, Chord template, int type, int dots, boolean triplet) {
+        return enter(s, p, template, type, dots, triplet, -1);
+    }
+
+    /**
+     * Enters a chord (or a rest when template is null). In triplet mode a new triplet is built on
+     * tripletUnit, the value that was selected when triplets were turned on (as in Dorico), and the
+     * entered value goes inside it: a quarter takes two slots of a triplet of eighths, a dotted 16th
+     * three quarters of one. Without a unit the triplet is built on the entered value (a dotted value:
+     * on the next larger one).
+     */
+    public static Pos enter(Score s, Pos p, Chord template, int type, int dots, boolean triplet, int tripletUnit) {
         if (p.measure >= s.measures.size()) s.appendMeasures(p.measure - s.measures.size() + 1);
         Measure m = s.measures.get(p.measure);
         Voice v = prepareVoice(m, p.staff, p.voice);
@@ -214,20 +225,33 @@ public final class ScoreEdit {
         ChordRest at = v.items.get(idx);
 
         if (at.tuplet != null && !(p.tick == tupletStart(v, at.tuplet) && Duration.ticks(type, dots) >= at.tuplet.spanTicks())) {
-            Tuplet t = at.tuplet;
-            int te = tupletEnd(v, t);
-            int raw = Duration.ticks(type, dots);
-            int d = t.scale(raw);
-            if (d > te - p.tick) d = te - p.tick;
-            List<ChordRest> els = buildPieces(template, Duration.decompose(d * t.actual / t.normal), t, false);
-            replaceRange(v, p.tick, d, els, t);
-            return advance(s, new Pos(p.measure, p.staff, p.voice, p.tick + d));
+            return enterInTuplet(s, p, v, at.tuplet, template, type, dots);
         }
 
         if (triplet && type < Duration.MAX_TYPE) {
+            // A triplet on another unit than the entered value (the unit chosen when triplets were
+            // turned on; for a dotted value the next larger one: a dotted 16th triplet is three
+            // quarters of a triplet eighth). Lay out that triplet as rests, then enter the value at
+            // its start.
+            int unit = tripletUnit >= 0 ? tripletUnit : (dots > 0 && type > Duration.WHOLE ? type - 1 : type);
+            if (unit != type || dots > 0) {
+                Tuplet t = new Tuplet(3, 2, unit);
+                int span = t.spanTicks();
+                if (p.tick + span <= m.ticks() && t.scale(Duration.ticks(type, dots)) <= span) {
+                    List<ChordRest> rests = new ArrayList<ChordRest>();
+                    for (int i = 0; i < 3; i++) {
+                        Rest r = new Rest();
+                        r.type = unit;
+                        r.tuplet = t;
+                        rests.add(r);
+                    }
+                    replaceRange(v, p.tick, span, rests, null);
+                    return enterInTuplet(s, p, v, t, template, type, dots);
+                }
+            }
             Tuplet t = new Tuplet(3, 2, type);
             int span = t.spanTicks();
-            if (p.tick + span <= m.ticks()) {
+            if (dots == 0 && p.tick + span <= m.ticks()) {
                 List<ChordRest> els = new ArrayList<ChordRest>();
                 for (int i = 0; i < 3; i++) {
                     ChordRest cr = (i == 0 && template != null) ? template.copy() : new Rest();
@@ -276,6 +300,21 @@ public final class ScoreEdit {
             }
         }
         return advance(s, cur);
+    }
+
+    /** Puts a value inside an existing tuplet at p, scaled by its ratio (and cut at the tuplet's end). */
+    private static Pos enterInTuplet(Score s, Pos p, Voice v, Tuplet t, Chord template, int type, int dots) {
+        int te = tupletEnd(v, t);
+        int d = t.scale(Duration.ticks(type, dots));
+        if (d > te - p.tick) d = te - p.tick;
+        // keep a value that exists as one note (a dotted one, say) in one piece
+        int[] ex = Duration.exact(d * t.actual / t.normal);
+        List<int[]> ds = new ArrayList<int[]>();
+        if (ex != null) ds.add(ex);
+        else ds.addAll(Duration.decompose(d * t.actual / t.normal));
+        List<ChordRest> els = buildPieces(template, ds, t, false);
+        replaceRange(v, p.tick, d, els, t);
+        return advance(s, new Pos(p.measure, p.staff, p.voice, p.tick + d));
     }
 
     private static List<ChordRest> buildPieces(Chord template, List<int[]> ds, Tuplet t, boolean continuation) {
@@ -373,12 +412,13 @@ public final class ScoreEdit {
         while (q.measure < s.measures.size()) {
             Voice v = s.measures.get(q.measure).staves.get(q.staff).voices[q.voice];
             if (!v.isEmpty() && v.indexAt(q.tick) >= 0) return q;
-            if (v.isEmpty()) {
-                q.measure++;
-                q.tick = 0;
-                continue;
+            if (!v.isEmpty()) {
+                Pos snapped = snapToElement(s, q);
+                if (snapped.measure > p.measure || (snapped.measure == p.measure && snapped.tick > p.tick)) return snapped;
             }
-            return snapToElement(s, q);
+            // an empty voice, or one that ends before the bar does: go on in the next bar
+            q.measure++;
+            q.tick = 0;
         }
         return null;
     }

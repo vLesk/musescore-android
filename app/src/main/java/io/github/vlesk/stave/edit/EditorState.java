@@ -45,6 +45,8 @@ public final class EditorState {
     public int durType = Duration.QUARTER;
     public int dots;
     public boolean triplet;
+    /** The value a new triplet is built on: the duration selected when triplets were turned on (-1: the entered value). */
+    public int tripletUnit = -1;
     public int voice;
     /** When on, piano keys add notes to the chord just entered instead of advancing. */
     public boolean chordMode;
@@ -269,7 +271,7 @@ public final class EditorState {
         Chord c = new Chord();
         c.addNote(new Note(pitch, tpc));
         Pos at = cursor.copy();
-        Pos after = ScoreEdit.enter(score, at, c, durType, triplet ? 0 : dots, triplet);
+        Pos after = ScoreEdit.enter(score, at, c, durType, dots, triplet, tripletUnit);
         lastEntered = at;
         cursor = after;
         cursor.voice = voice;
@@ -305,7 +307,7 @@ public final class EditorState {
         if (cursor == null) startInput();
         checkpoint();
         Pos at = cursor.copy();
-        cursor = ScoreEdit.enter(score, at, null, durType, triplet ? 0 : dots, triplet);
+        cursor = ScoreEdit.enter(score, at, null, durType, dots, triplet, tripletUnit);
         cursor.voice = voice;
         lastEntered = null;
         selKind = SEL_CHORDREST;
@@ -328,7 +330,7 @@ public final class EditorState {
         for (Note n : tmpl.notes) n.tieForward = false;
         for (Note n : ((Chord) pcr).notes) n.tieForward = true;
         Pos at = cursor.copy();
-        cursor = ScoreEdit.enter(score, at, tmpl, durType, triplet ? 0 : dots, triplet);
+        cursor = ScoreEdit.enter(score, at, tmpl, durType, dots, triplet, tripletUnit);
         cursor.voice = voice;
         lastEntered = at;
         selKind = SEL_CHORDREST;
@@ -411,6 +413,12 @@ public final class EditorState {
 
     // ------------------------------------------------------------------ duration
 
+    /** Turns triplets on or off. The selected value becomes the triplet's unit (triplet eighths, say). */
+    public void setTriplet(boolean on) {
+        triplet = on;
+        tripletUnit = on ? durType : -1;
+    }
+
     public void setDuration(int type) {
         durType = type;
         if (type == Duration.MAX_TYPE) dots = 0;
@@ -485,6 +493,22 @@ public final class EditorState {
             c.sortNotes();
         }
         changed();
+    }
+
+    /** Respells the selected note (or every note of the selected chord) enharmonically, as MuseScore's J. */
+    public boolean respell() {
+        ChordRest cr = selectedChordRest();
+        if (!(cr instanceof Chord) || selKind == SEL_RANGE) return false;
+        checkpoint();
+        Note sel = selectedNote();
+        for (Note n : ((Chord) cr).notes) {
+            if (sel != null && n != sel) continue;
+            n.tpc = Pitch.nextSpelling(n.tpc);
+            n.forceAccidental = false;
+        }
+        ((Chord) cr).sortNotes();
+        changed();
+        return true;
     }
 
     public void applyAccidental(int alter) {
@@ -810,7 +834,10 @@ public final class EditorState {
         while (q != null) {
             if (ScoreEdit.elementAt(score, q) instanceof Chord) n++;
             if (q.measure == b.measure && q.tick == b.tick) break;
-            q = ScoreEdit.next(score, q);
+            if (q.measure > b.measure || (q.measure == b.measure && q.tick > b.tick)) break;
+            Pos nq = ScoreEdit.next(score, q);
+            if (nq != null && (nq.measure < q.measure || (nq.measure == q.measure && nq.tick <= q.tick))) break;
+            q = nq;
         }
         return n;
     }

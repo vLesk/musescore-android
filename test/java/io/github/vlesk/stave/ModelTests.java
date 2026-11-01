@@ -78,6 +78,24 @@ public class ModelTests {
         check(Clef.line(Clef.BASS, 57, 17) == 0, "A3 top line bass");
         check(Pitch.keyAlter(2, 3) == 1 && Pitch.keyAlter(2, 0) == 1 && Pitch.keyAlter(2, 4) == 0, "D major alters");
         check(Pitch.keyAlter(-1, 6) == -1 && Pitch.keyAlter(-1, 2) == 0, "F major alters");
+        // chromatic notes from the piano: fewer accidentals win a tie (Lindenbaum, Maple Leaf Rag)
+        check(Pitch.spell(72, 4) == 14, "C natural in E major, not B sharp: " + Pitch.spell(72, 4));
+        check(Pitch.spell(69, -5) == 17, "A natural in D flat major, not B double flat: " + Pitch.spell(69, -5));
+        check(Pitch.spell(66, 2) == 20 && Pitch.spell(70, -1) == 12, "diatonic spellings unchanged");
+        // respell cycles the spellings of one pitch: B -> A double sharp -> C flat -> B
+        check(Pitch.nextSpelling(19) == 31 && Pitch.nextSpelling(31) == 7 && Pitch.nextSpelling(7) == 19, "respell cycle B");
+        check(Pitch.nextSpelling(21) == 33 && Pitch.nextSpelling(33) == 9 && Pitch.nextSpelling(9) == 21, "respell C sharp -> B double sharp -> D flat");
+        {
+            Score rs = pianoScore();
+            io.github.vlesk.stave.edit.EditorState es = new io.github.vlesk.stave.edit.EditorState(rs);
+            es.startInput();
+            es.enterPitch(71, Integer.MIN_VALUE);
+            int before = es.selectedNote().tpc;
+            check(es.respell() && es.selectedNote().pitch == 71 && es.selectedNote().tpc != before, "respell keeps the pitch, changes the spelling");
+            es.respell();
+            es.respell();
+            check(es.selectedNote().tpc == before, "respell cycles back");
+        }
         check(MathUtil.floorMod(-1, 7) == 6 && MathUtil.floorDiv(-1, 7) == -1, "floor");
 
         // durations
@@ -382,6 +400,66 @@ public class ModelTests {
             start = es.lyricStartPos();
             check(start != null && start.tick == 480, "starts at the selected chord");
             check(new io.github.vlesk.stave.edit.EditorState(pianoScore()).lyricStartPos() == null, "no chords: no start");
+        }
+
+        // dotted values in triplet mode (Schubert, Der Lindenbaum bar 11): a dotted 16th + 32nd inside
+        // triplet eighths, entered with the duration, dot and triplet buttons
+        {
+            List<Part> vp = new ArrayList<Part>();
+            vp.add(Instruments.byId("voice").create());
+            io.github.vlesk.stave.edit.EditorState es = new io.github.vlesk.stave.edit.EditorState(Score.create("T", "", vp, 3, 4, 4, 100, 2));
+            es.startInput();
+            es.setDuration(Duration.QUARTER);
+            es.toggleDot();
+            es.enterPitch(64, Integer.MIN_VALUE);
+            es.setDuration(Duration.EIGHTH);
+            es.toggleDot();
+            es.enterPitch(66, Integer.MIN_VALUE);
+            es.triplet = true;
+            int[][] rhythm = {{Duration.N16, 1}, {Duration.N32, 0}, {Duration.EIGHTH, 0}, {Duration.N16, 1}, {Duration.N32, 0}};
+            for (int[] rh : rhythm) {
+                es.setDuration(rh[0]);
+                if ((es.dots > 0) != (rh[1] > 0)) es.toggleDot();
+                es.enterPitch(68, Integer.MIN_VALUE);
+            }
+            Voice tv = es.score.measures.get(0).staves.get(0).voices[0];
+            check(tv.totalTicks() == 1440, "triplet bar fills the measure: " + tv.totalTicks());
+            StringBuilder got = new StringBuilder();
+            for (ChordRest cr : tv.items) got.append(cr.type).append('.').append(cr.dots).append(cr.tuplet != null ? "t" + cr.tuplet.baseType : "").append(' ');
+            check(got.toString().equals("2.1 3.0 4.1t3 5.0t3 3.0t3 4.1t3 5.0t3 "), "dotted rhythm inside triplet eighths: " + got);
+            check(es.cursor.measure == 1 && es.cursor.tick == 0, "cursor after the triplet: " + es.cursor);
+            // a voice that ends before its bar does: next() still moves on instead of returning the same note
+            tv.items.remove(tv.items.size() - 1);
+            int lastIdx = tv.items.size() - 1;
+            Pos nx = ScoreEdit.next(es.score, new Pos(0, 0, 0, tv.starts()[lastIdx]));
+            check(nx != null && nx.measure == 1 && nx.tick == 0, "next() past a short voice: " + nx);
+        }
+
+        // a triplet quarter + eighth in one beat (Lindenbaum bar 37): triplets turned on with the eighth
+        // selected make a triplet of eighths, and a quarter entered in it takes two of its slots
+        {
+            List<Part> vp = new ArrayList<Part>();
+            vp.add(Instruments.byId("piano").create());
+            io.github.vlesk.stave.edit.EditorState es = new io.github.vlesk.stave.edit.EditorState(Score.create("T", "", vp, 3, 4, 4, 100, 2));
+            es.startInput();
+            es.setDuration(Duration.EIGHTH);
+            es.setTriplet(true);
+            es.setDuration(Duration.QUARTER);
+            es.enterPitch(59, Integer.MIN_VALUE);
+            es.setDuration(Duration.EIGHTH);
+            es.enterPitch(64, Integer.MIN_VALUE);
+            check(es.cursor.tick == 480, "after quarter + eighth triplet the cursor is on beat 2: " + es.cursor);
+            es.setTriplet(false);
+            es.setDuration(Duration.QUARTER);
+            es.enterRest();
+            es.enterRest();
+            Voice tv = es.score.measures.get(0).staves.get(0).voices[0];
+            StringBuilder got = new StringBuilder();
+            int[] st = tv.starts();
+            for (int k = 0; k < tv.items.size(); k++) got.append(st[k]).append(':').append(tv.items.get(k).ticks()).append(' ');
+            check(got.toString().equals("0:320 320:160 480:480 960:480 "), "quarter-eighth triplet then quarters: " + got);
+            check(tv.items.get(0).tuplet == tv.items.get(1).tuplet && tv.items.get(0).tuplet.baseType == Duration.EIGHTH,
+                    "both in one triplet of eighths");
         }
 
         // melisma (extender line) and hyphen extension, typed as in MuseScore

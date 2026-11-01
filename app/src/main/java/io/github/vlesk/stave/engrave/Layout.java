@@ -660,9 +660,14 @@ public final class Layout {
         si.lastMeasure = m1;
         si.x0 = left;
         si.x1 = o.width - o.marginX;
-        // horizontal positions
+        // horizontal positions; if the measures still do not fit (one very busy bar on a phone), a
+        // second pass squeezes every column of the system uniformly so nothing runs off the page
         float x = left + header;
         float[] mx = new float[m1 - m0 + 1];
+        float squeeze = 1f;
+        for (int pass = 0; pass < 2; pass++) {
+        x = left + header;
+        float colSum = 0;
         for (int m = m0; m <= m1; m++) {
             MPrep p = preps.get(m);
             Measure mm = s.measures.get(m);
@@ -678,12 +683,13 @@ public final class Layout {
                 Col c = p.cols.get(i);
                 float w = c.accPad + Math.max(c.spring, c.minW) + c.spring * ratio;
                 w = Math.max(w, c.accPad + c.minW * 0.85f);
+                colSum += w;
                 mi.colTicks[i] = c.tick;
-                mi.colX[i] = cx + c.accPad;
-                cx += w;
+                mi.colX[i] = cx + c.accPad * squeeze;
+                cx += w * squeeze;
             }
             float width = (cx + 0.4f + (mm.endBarline == Measure.BAR_END_REPEAT ? 1.3f : 0)) - x;
-            if (p.allRests) {
+            if (p.allRests && squeeze == 1f) {
                 // measure-rest bars keep a minimum width and stretch like the others
                 float natural = p.natural + mid;
                 float springSum = 0;
@@ -696,6 +702,12 @@ public final class Layout {
             dl.measures.set(m, mi);
             mx[m - m0] = x;
             x += width;
+        }
+        float limit = o.width - o.marginX;
+        if (x <= limit + 0.01f || colSum <= 0) break;
+        // the fixed parts (header, bar padding) stay; the columns share what is left
+        float fixed = x - (left + header) - colSum;
+        squeeze = Math.max(0.3f, (limit - left - header - fixed) / colSum);
         }
         // the last measure ends exactly at the system end when justified
         if (ratio > 0) {
