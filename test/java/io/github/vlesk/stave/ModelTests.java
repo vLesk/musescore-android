@@ -412,6 +412,78 @@ public class ModelTests {
             check(checked >= 3, "lyric hits found: " + checked);
         }
 
+        // lyrics as MuseScore lays them out: centred on the notehead, hyphen drawn as a centred dash,
+        // neighbours never overlap, and files carry <syllabic> instead of a literal hyphen
+        {
+            List<Part> ps = new ArrayList<Part>();
+            ps.add(Instruments.byId("soprano").create());
+            Score sc = Score.create("Dash", "", ps, 4, 4, 0, 100, 4);
+            String[] words = {"Hal-", "le-", "lu-", "jah,", "ex-", "tra-", "or-", "di-", "na-", "ry", "a", "song"};
+            Pos wp = new Pos(0, 0, 0, 0);
+            for (String w : words) {
+                Chord ch = chord(67);
+                ch.lyric = w;
+                wp = ScoreEdit.enter(sc, wp, ch, Duration.QUARTER, 0, false);
+            }
+            TextMetrics tm = new TextMetrics() {
+                public float width(String t, int font, float sizeSp) {
+                    return t.length() * sizeSp * 0.5f;
+                }
+            };
+            Layout.Options lo = new Layout.Options();
+            lo.width = 50;
+            DisplayList dl = Layout.layout(sc, tm, lo);
+            float head = io.github.vlesk.stave.engrave.Sym.width(io.github.vlesk.stave.engrave.Sym.noteheadBlack);
+            DisplayList.Hit hal = null, le = null, jah = null;
+            for (DisplayList.Hit h : dl.lyricHits) {
+                if ("Hal-".equals(h.cr.lyric)) hal = h;
+                if ("le-".equals(h.cr.lyric)) le = h;
+                if ("jah,".equals(h.cr.lyric)) jah = h;
+            }
+            check(hal != null && le != null && jah != null, "lyric hits for the test words");
+            float noteCentre = dl.xAt(hal.pos.measure, hal.pos.tick) + head / 2;
+            check(Math.abs((hal.x0 + hal.x1) / 2 - noteCentre) < 1e-3f && Math.abs(hal.x1 - hal.x0 - 3 * 1.0f) < 1e-3f,
+                    "a syllable is centred on its notehead, without its hyphen: " + hal.x0 + ".." + hal.x1 + " centre " + noteCentre);
+            float jahCentre = dl.xAt(jah.pos.measure, jah.pos.tick) + head / 2;
+            check(Math.abs((jah.x0 + 3 * 1.0f / 2) - jahCentre) < 1e-3f, "trailing punctuation hangs outside the centring");
+            boolean hyphenText = false;
+            int dashes = 0;
+            for (DisplayList.Item it : dl.items) {
+                if (it.kind == DisplayList.TEXT && it.text != null && it.text.endsWith("-") && it.text.length() > 1) hyphenText = true;
+                if (it.kind == DisplayList.LINE && it.y == it.y2 && it.x >= hal.x1 && it.x2 <= le.x0) {
+                    dashes++;
+                    float gapMid = (hal.x1 + le.x0) / 2;
+                    check(Math.abs((it.x + it.x2) / 2 - gapMid) < 1e-3f, "the dash is centred between the syllables");
+                    check(it.x2 - it.x >= 0.4f - 1e-4f && it.x2 - it.x <= 0.6f + 1e-4f, "dash length " + (it.x2 - it.x));
+                    float textBaseline = Float.NaN;
+                    for (DisplayList.Item t : dl.items) if (t.kind == DisplayList.TEXT && "Hal".equals(t.text)) textBaseline = t.y;
+                    check(it.y < textBaseline && it.y > textBaseline - 1.0f, "the dash sits at mid x-height of the text: " + it.y + " vs " + textBaseline);
+                }
+            }
+            check(!hyphenText, "no hyphen is drawn as text");
+            check(dashes == 1, "one dash between Hal and le: " + dashes);
+            // neighbours on a system keep MuseScore's gap; hyphenated ones leave room for the dash
+            for (int k = 0; k + 1 < dl.lyricHits.size(); k++) {
+                DisplayList.Hit a = dl.lyricHits.get(k), b = dl.lyricHits.get(k + 1);
+                if (dl.measures.get(a.pos.measure).system != dl.measures.get(b.pos.measure).system) continue;
+                float need = io.github.vlesk.stave.model.Syllables.hyphenated(a.cr.lyric) ? 0.5f : 0.25f;
+                check(b.x0 - a.x1 >= need * 0.85f - 1e-3f, "lyrics overlap: " + a.cr.lyric + " / " + b.cr.lyric + " gap " + (b.x0 - a.x1));
+            }
+            // files: <syllabic> begin/middle/end, no literal hyphen; reading gives the same syllables back
+            String mscx = MscxWriter.write(sc);
+            check(mscx.contains("<syllabic>begin</syllabic>") && mscx.contains("<syllabic>middle</syllabic>")
+                    && mscx.contains("<syllabic>end</syllabic>") && !mscx.contains("<text>Hal-</text>") && mscx.contains("<text>Hal</text>"),
+                    "mscx writes syllabic");
+            Score back = MscxReader.read(mscx.getBytes("UTF-8")).score;
+            Score backXml = MusicXmlReader.read(MusicXmlWriter.write(sc).getBytes("UTF-8")).score;
+            for (int k = 0; k < 4; k++) {
+                ChordRest o = sc.measures.get(0).staves.get(0).voices[0].items.get(k);
+                ChordRest rb = back.measures.get(0).staves.get(0).voices[0].items.get(k);
+                ChordRest rx = backXml.measures.get(0).staves.get(0).voices[0].items.get(k);
+                check(o.lyric.equals(rb.lyric) && o.lyric.equals(rx.lyric), "syllable round trip: " + o.lyric + " / " + rb.lyric + " / " + rx.lyric);
+            }
+        }
+
         // MuseScore's own test files
         int ok = 0, total = 0;
         if (args.length > 0) {

@@ -12,6 +12,7 @@ import io.github.vlesk.stave.model.Note;
 import io.github.vlesk.stave.model.Part;
 import io.github.vlesk.stave.model.Pitch;
 import io.github.vlesk.stave.model.Pos;
+import io.github.vlesk.stave.model.Syllables;
 import io.github.vlesk.stave.model.Rest;
 import io.github.vlesk.stave.model.Score;
 import io.github.vlesk.stave.model.StaffMeasure;
@@ -109,6 +110,23 @@ public final class Layout {
     private final int staffCount;
 
     private static final float HEAD_W = Sym.width(Sym.noteheadBlack);
+
+    // Lyrics, following MuseScore's engraving style defaults (src/engraving/style/styledef.cpp), in staff spaces
+    /** Edwin 10pt at the default spatium (lyricsOddFontSize / lyricsEvenFontSize). */
+    private static final float LYRIC_SIZE = 2.0f;
+    /** Baseline below the top staff line: staff height + lyricsPosBelow (3.0). */
+    private static final float LYRIC_BASELINE = 4f + 3.0f;
+    /** Ascent of the lyric text, for keeping lyricsMinTopDistance (1.0) to what is above. */
+    private static final float LYRIC_ASCENT = 1.5f;
+    private static final float LYRIC_MIN_TOP_DISTANCE = 1.0f;
+    /** Minimum gap between neighbouring lyrics (lyricsMinDistance). */
+    private static final float LYRIC_MIN_DISTANCE = 0.25f;
+    /** Dashes: lyricsDashMinLength, lyricsDashMaxLength, lyricsDashPad, lyricsDashMaxDistance, lyricsDashLineThickness. */
+    private static final float DASH_MIN = 0.4f, DASH_MAX = 0.6f, DASH_PAD = 0.05f, DASH_MAX_DISTANCE = 16f, DASH_THICKNESS = 0.1f;
+    /** Room a hyphenated syllable needs before the next one: a minimum-length dash with its padding. */
+    private static final float DASH_SPACE = DASH_MIN + 2 * DASH_PAD;
+    /** Dashes sit half the x-height above the baseline (lyricsDashYposRatio 0.5); Edwin's x-height is about 0.466 em. */
+    private static final float DASH_RAISE = 0.5f * 0.466f * LYRIC_SIZE;
 
     private Layout(Score s, TextMetrics tm, Options o) {
         this.s = s;
@@ -422,10 +440,11 @@ public final class Layout {
                 c.spring = spring(next - c.tick);
                 float right = HEAD_W + 0.5f;
                 float acc = 0;
-                float lyricW = 0;
+                float lyricW = 0, lyricLead = 0;
                 for (int st = 0; st < staffCount; st++) {
                     int clef = s.clefAt(st, m);
-                    for (Voice v : mm.staves.get(st).voices) {
+                    for (int vi = 0; vi < StaffMeasure.VOICES; vi++) {
+                        Voice v = mm.staves.get(st).voices[vi];
                         int idx = v.indexAt(c.tick);
                         if (idx < 0) continue;
                         ChordRest cr = v.items.get(idx);
@@ -443,14 +462,31 @@ public final class Layout {
                             }
                             if (accs > 0) acc = Math.max(acc, 0.3f + Math.min(accs, 3) * 1.15f);
                             if (second) right += HEAD_W;
-                            if (ch.lyric != null) lyricW = Math.max(lyricW, tm.width(ch.lyric, TextMetrics.FONT_TEXT, 1.9f) + 0.8f);
+                            if (ch.lyric != null && v.starts()[idx] == c.tick) {
+                                // lyrics are centred on their notes, so two neighbours need half of each
+                                // width plus MuseScore's gap (more when a dash has to fit between them)
+                                float lw = lyricWidth(ch.lyric);
+                                ChordRest nx = nextInVoice(m, st, vi, idx);
+                                float need;
+                                if (nx instanceof Chord && nx.lyric != null) {
+                                    float gap = Syllables.hyphenated(ch.lyric) ? DASH_SPACE : LYRIC_MIN_DISTANCE;
+                                    need = lw / 2 + lyricWidth(nx.lyric) / 2 + gap;
+                                } else {
+                                    need = HEAD_W / 2 + lw / 2 + LYRIC_MIN_DISTANCE;
+                                }
+                                // the last note of a bar: the next one follows the bar's end and start padding
+                                if (idx + 1 >= v.items.size()) need -= 1.5f;
+                                lyricW = Math.max(lyricW, need);
+                                if (c.tick == 0) lyricLead = Math.max(lyricLead, lw / 2 - HEAD_W / 2 - 1.0f);
+                            }
                         }
                         if (cr.chordSymbol != null) {
                             lyricW = Math.max(lyricW, tm.width(ChordSymbols.display(cr.chordSymbol), TextMetrics.FONT_TEXT, 2.2f) + 0.8f);
                         }
                     }
                 }
-                c.accPad = acc;
+                // a long first syllable of a bar may need room before its note
+                c.accPad = Math.max(acc, lyricLead);
                 c.minW = Math.max(right, lyricW);
                 c.width = c.accPad + Math.max(c.spring, c.minW);
                 p.cols.add(c);
@@ -552,6 +588,7 @@ public final class Layout {
             sysIdx++;
         }
         drawTies();
+        drawLyricDashes();
         if (o.pageHeight > 0) dl.height = (page + 1) * o.pageHeight;
         else dl.height = y + 2;
     }
@@ -579,6 +616,7 @@ public final class Layout {
             DisplayList.Hit h = dl.lyricHits.get(i);
             h.y0 += dy;
             h.y1 += dy;
+            h.baseline += dy;
         }
         for (NoteRec r : noteRecs.values()) if (r.system == sysIdx) r.y += dy;
     }
@@ -704,6 +742,7 @@ public final class Layout {
             for (DisplayList.Hit h : gens[st].lyricHits) {
                 h.y0 += oy;
                 h.y1 += oy;
+                h.baseline += oy;
                 dl.lyricHits.add(h);
             }
         }
@@ -1361,7 +1400,7 @@ public final class Layout {
             }
         }
         float dynY = Math.max(6.2f, g.bottom + 2.2f);
-        float lyrY = hasDyn ? dynY + 3.0f : Math.max(6.8f, g.bottom + 2.8f);
+        float lyrY = hasDyn ? dynY + 3.0f : Math.max(LYRIC_BASELINE, g.bottom + LYRIC_MIN_TOP_DISTANCE + LYRIC_ASCENT);
         float chordY = Math.min(-2.0f, g.top - 1.0f);
         float textY = hasChords ? chordY - 2.8f : chordY;
         for (int m = m0; m <= m1; m++) {
@@ -1383,9 +1422,12 @@ public final class Layout {
                         }
                     }
                     if (cr.lyric != null && cr instanceof Chord) {
-                        float w = tm.width(cr.lyric, TextMetrics.FONT_TEXT, 1.9f);
-                        float lx = x + HEAD_W / 2 - Math.min(w / 2, 1.2f) + 0.0f;
-                        DisplayList.Item it = text(g.items, cr.lyric, TextMetrics.FONT_TEXT, 1.9f, lx, lyrY, DisplayList.ALIGN_LEFT);
+                        // MuseScore: centred on the notehead; leading and trailing punctuation hangs outside
+                        // the centring (lyricsAlignVerseNumber). The hyphen marker is drawn as dashes later.
+                        String shown = Syllables.text(cr.lyric);
+                        float w = tm.width(shown, TextMetrics.FONT_TEXT, LYRIC_SIZE);
+                        float lx = x + HEAD_W / 2 - w / 2 - lyricCenterAdjust(shown) / 2;
+                        DisplayList.Item it = text(g.items, shown, TextMetrics.FONT_TEXT, LYRIC_SIZE, lx, lyrY, DisplayList.ALIGN_LEFT);
                         it.owner = cr;
                         g.ext(lyrY - 1.6f, lyrY + 0.6f);
                         DisplayList.Hit lh = new DisplayList.Hit();
@@ -1393,6 +1435,7 @@ public final class Layout {
                         lh.x1 = lx + w;
                         lh.y0 = lyrY - 1.6f;
                         lh.y1 = lyrY + 0.6f;
+                        lh.baseline = lyrY;
                         lh.pos = new Pos(m, st, v, starts[i]);
                         lh.cr = cr;
                         g.lyricHits.add(lh);
@@ -1606,6 +1649,88 @@ public final class Layout {
         float[] p2 = new float[k];
         System.arraycopy(pts, 0, p2, 0, k);
         poly(out, p2);
+    }
+
+    // --------------------------------------------------------------------------- lyrics
+
+    private float lyricWidth(String lyric) {
+        return tm.width(Syllables.text(lyric), TextMetrics.FONT_TEXT, LYRIC_SIZE);
+    }
+
+    /** The next chord or rest in a voice, continuing into the next bar. */
+    private ChordRest nextInVoice(int m, int st, int v, int idx) {
+        Voice voice = s.measures.get(m).staves.get(st).voices[v];
+        if (idx + 1 < voice.items.size()) return voice.items.get(idx + 1);
+        if (m + 1 >= s.measures.size()) return null;
+        Voice nv = s.measures.get(m + 1).staves.get(st).voices[v];
+        return nv.items.isEmpty() ? null : nv.items.get(0);
+    }
+
+    /**
+     * MuseScore centres only the letters: leading and trailing non-letters (verse numbers,
+     * punctuation) are excluded. Returns leadingWidth - trailingWidth; the text moves left by half.
+     */
+    private float lyricCenterAdjust(String t) {
+        int first = -1, last = -1;
+        for (int i = 0; i < t.length(); i++) {
+            if (Character.isLetter(t.charAt(i))) {
+                if (first < 0) first = i;
+                last = i;
+            }
+        }
+        if (first < 0) return 0;
+        float lead = first > 0 ? tm.width(t.substring(0, first), TextMetrics.FONT_TEXT, LYRIC_SIZE) : 0;
+        float trail = last < t.length() - 1 ? tm.width(t.substring(last + 1), TextMetrics.FONT_TEXT, LYRIC_SIZE) : 0;
+        return lead - trail;
+    }
+
+    /**
+     * Dashes between a hyphenated syllable and the next one, as MuseScore lays them out
+     * (LyricsLayout::layoutDashes): the line runs from just after the first syllable to just before
+     * the next, and its dashes are centred in it. Across a line break the line ends at the end of
+     * the system and starts again before the next syllable.
+     */
+    private void drawLyricDashes() {
+        Map<ChordRest, DisplayList.Hit> at = new IdentityHashMap<ChordRest, DisplayList.Hit>();
+        for (DisplayList.Hit h : dl.lyricHits) at.put(h.cr, h);
+        for (DisplayList.Hit h : dl.lyricHits) {
+            if (!Syllables.hyphenated(h.cr.lyric)) continue;
+            Voice voice = s.measures.get(h.pos.measure).staves.get(h.pos.staff).voices[h.pos.voice];
+            ChordRest next = Syllables.next(s, h.pos.measure, h.pos.staff, h.pos.voice, voice.indexAt(h.pos.tick));
+            DisplayList.Hit n = next == null ? null : at.get(next);
+            if (n == null) continue;
+            int sa = dl.measures.get(h.pos.measure).system, sb = dl.measures.get(n.pos.measure).system;
+            if (sa == sb) {
+                dashes(h.x1 + DASH_PAD, n.x0 - DASH_PAD, h.baseline - DASH_RAISE, false);
+            } else {
+                DisplayList.SystemInfo a = dl.systems.get(sa), b = dl.systems.get(sb);
+                dashes(h.x1 + DASH_PAD, a.x1 - 0.5f, h.baseline - DASH_RAISE, false);
+                dashes(dl.measures.get(b.firstMeasure).contentX - 0.5f, n.x0 - DASH_PAD, n.baseline - DASH_RAISE, true);
+            }
+        }
+    }
+
+    private void dashes(float x0, float x1, float y, boolean firstOnSystem) {
+        float len = x1 - x0;
+        // first and last gaps are half a gap (lyricsDashFirstAndLastGapAreHalf); always at least one dash (lyricsDashForce)
+        int count = len > DASH_MAX_DISTANCE ? (int) Math.ceil(len / DASH_MAX_DISTANCE) : 1;
+        if (len < DASH_MIN) {
+            float diff = DASH_MIN - len;
+            if (firstOnSystem) {
+                x0 -= diff;
+            } else {
+                x0 -= diff / 2;
+                x1 += diff / 2;
+            }
+            len = x1 - x0;
+        }
+        float dw = Math.min(len, DASH_MAX);
+        float dist = len / count;
+        float xd = 0;
+        for (int i = 0; i < count; i++) {
+            xd += i == 0 ? dist / 2 : dist;
+            line(dl.items, x0 + xd - dw / 2, y, x0 + xd + dw / 2, y, DASH_THICKNESS);
+        }
     }
 
     // --------------------------------------------------------------------------- ties

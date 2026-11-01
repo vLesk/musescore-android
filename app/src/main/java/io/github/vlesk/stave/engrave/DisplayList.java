@@ -73,6 +73,8 @@ public final class DisplayList {
         public ChordRest cr;
         public Note note;
         public int noteIdx = -1;
+        /** Text baseline (lyric hits only). */
+        public float baseline;
     }
 
     public static final class SystemInfo {

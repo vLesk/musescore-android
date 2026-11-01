@@ -14,6 +14,7 @@ import io.github.vlesk.stave.model.Part;
 import io.github.vlesk.stave.model.Pitch;
 import io.github.vlesk.stave.model.Rest;
 import io.github.vlesk.stave.model.Score;
+import io.github.vlesk.stave.model.Syllables;
 import io.github.vlesk.stave.model.StaffMeasure;
 import io.github.vlesk.stave.model.Tuplet;
 import io.github.vlesk.stave.model.Voice;
@@ -309,9 +310,12 @@ public final class MscxWriter {
                 if (c.dots > 0) x.tag("dots", c.dots);
                 x.tag("durationType", Duration.xmlName(c.type));
                 if (c.stemDir != Chord.STEM_AUTO) x.tag("StemDirection", c.stemDir == Chord.STEM_UP ? "up" : "down");
-                if (c.lyric != null && !c.lyric.isEmpty()) {
+                if (c.lyric != null && !Syllables.text(c.lyric).isEmpty()) {
+                    // as MuseScore writes it: <syllabic> (unless single) before the text, no hyphen in the text
                     x.open("Lyrics");
-                    x.tag("text", c.lyric);
+                    String syl = Syllables.syllabic(s, m, st, v, i);
+                    if (!syl.equals("single")) x.tag("syllabic", syl);
+                    x.tag("text", Syllables.text(c.lyric));
                     x.close();
                 }
                 for (String a : c.articulations) {

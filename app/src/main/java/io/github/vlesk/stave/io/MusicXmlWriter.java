@@ -12,6 +12,7 @@ import io.github.vlesk.stave.model.Part;
 import io.github.vlesk.stave.model.Pitch;
 import io.github.vlesk.stave.model.Rest;
 import io.github.vlesk.stave.model.Score;
+import io.github.vlesk.stave.model.Syllables;
 import io.github.vlesk.stave.model.StaffMeasure;
 import io.github.vlesk.stave.model.Voice;
 
@@ -304,13 +305,9 @@ public final class MusicXmlWriter {
                     }
                     x.close();
                 }
-                if (ni == 0 && c.lyric != null && !c.lyric.isEmpty()) {
-                    String txt = c.lyric;
-                    String syl = "single";
-                    if (txt.endsWith("-")) {
-                        txt = txt.substring(0, txt.length() - 1);
-                        syl = "begin";
-                    }
+                if (ni == 0 && c.lyric != null && !Syllables.text(c.lyric).isEmpty()) {
+                    String txt = Syllables.text(c.lyric);
+                    String syl = Syllables.syllabic(s, m, st, v, i);
                     x.open("lyric", "number", "1");
                     x.tag("syllabic", syl);
                     x.tag("text", txt);
