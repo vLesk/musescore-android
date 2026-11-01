@@ -14,7 +14,7 @@ on:
         required: false
         default: ''
       ref:
-        description: 'Commit, branch or tag to build (default: the branch the workflow runs on)'
+        description: 'Full commit SHA, branch or tag to build (default: the branch tip). GitHub only lets the workflow tag an older commit if that commit does not change workflow files.'
         required: false
         default: ''
 
