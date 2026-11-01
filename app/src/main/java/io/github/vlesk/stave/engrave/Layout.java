@@ -90,6 +90,7 @@ public final class Layout {
     private static final class StaffGen {
         final List<DisplayList.Item> items = new ArrayList<DisplayList.Item>();
         final List<DisplayList.Hit> hits = new ArrayList<DisplayList.Hit>();
+        final List<DisplayList.Hit> lyricHits = new ArrayList<DisplayList.Hit>();
         float top = 0, bottom = 4;
 
         void ext(float y0, float y1) {
@@ -555,7 +556,7 @@ public final class Layout {
         else dl.height = y + 2;
     }
 
-    private int systemItemStart = 0, systemHitStart = 0;
+    private int systemItemStart = 0, systemHitStart = 0, systemLyricHitStart = 0;
 
     private void shiftSystem(int sysIdx, float dy) {
         DisplayList.SystemInfo si = dl.systems.get(sysIdx);
@@ -571,6 +572,11 @@ public final class Layout {
         }
         for (int i = systemHitStart; i < dl.hits.size(); i++) {
             DisplayList.Hit h = dl.hits.get(i);
+            h.y0 += dy;
+            h.y1 += dy;
+        }
+        for (int i = systemLyricHitStart; i < dl.lyricHits.size(); i++) {
+            DisplayList.Hit h = dl.lyricHits.get(i);
             h.y0 += dy;
             h.y1 += dy;
         }
@@ -607,6 +613,7 @@ public final class Layout {
     private float layoutSystem(int sysIdx, int m0, int m1, float left, float header, float ratio, float y) {
         systemItemStart = dl.items.size();
         systemHitStart = dl.hits.size();
+        systemLyricHitStart = dl.lyricHits.size();
         DisplayList.SystemInfo si = new DisplayList.SystemInfo();
         si.firstMeasure = m0;
         si.lastMeasure = m1;
@@ -693,6 +700,11 @@ public final class Layout {
                 h.y0 += oy;
                 h.y1 += oy;
                 dl.hits.add(h);
+            }
+            for (DisplayList.Hit h : gens[st].lyricHits) {
+                h.y0 += oy;
+                h.y1 += oy;
+                dl.lyricHits.add(h);
             }
         }
         // translate note records of this system
@@ -1383,7 +1395,7 @@ public final class Layout {
                         lh.y1 = lyrY + 0.6f;
                         lh.pos = new Pos(m, st, v, starts[i]);
                         lh.cr = cr;
-                        dl.lyricHits.add(lh);
+                        g.lyricHits.add(lh);
                     }
                     if (cr.chordSymbol != null) {
                         DisplayList.Item it = text(g.items, ChordSymbols.display(cr.chordSymbol), TextMetrics.FONT_TEXT, 2.2f, x, chordY, DisplayList.ALIGN_LEFT);

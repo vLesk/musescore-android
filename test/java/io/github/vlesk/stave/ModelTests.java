@@ -384,6 +384,34 @@ public class ModelTests {
             check(new io.github.vlesk.stave.edit.EditorState(pianoScore()).lyricStartPos() == null, "no chords: no start");
         }
 
+        // lyric positions are in page coordinates: below their staff, not at the top of the page
+        {
+            List<Part> ps = new ArrayList<Part>();
+            ps.add(Instruments.byId("soprano").create());
+            Score sc = Score.create("Lyr", "", ps, 4, 4, 0, 100, 40);
+            for (int m = 0; m < sc.measures.size(); m += 4) {
+                Chord ch = chord(67);
+                ch.lyric = "la";
+                ScoreEdit.enter(sc, new Pos(m, 0, 0, 0), ch, Duration.QUARTER, 0, false);
+            }
+            Layout.Options lo = new Layout.Options();
+            lo.width = 40;
+            DisplayList dl = Layout.layout(sc, new TextMetrics() {
+                public float width(String t, int font, float sizeSp) {
+                    return t.length() * sizeSp * 0.5f;
+                }
+            }, lo);
+            check(dl.systems.size() > 2, "several systems: " + dl.systems.size());
+            int checked = 0;
+            for (DisplayList.Hit h : dl.lyricHits) {
+                DisplayList.SystemInfo si = dl.systems.get(dl.measures.get(h.pos.measure).system);
+                float staffBottom = si.staffY[0] + 4;
+                check(h.y0 > staffBottom && h.y1 < staffBottom + 8, "lyric hit sits below its staff: " + h.y0 + " vs staff bottom " + staffBottom);
+                checked++;
+            }
+            check(checked >= 3, "lyric hits found: " + checked);
+        }
+
         // MuseScore's own test files
         int ok = 0, total = 0;
         if (args.length > 0) {

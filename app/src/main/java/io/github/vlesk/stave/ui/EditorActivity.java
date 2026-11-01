@@ -389,7 +389,7 @@ public final class EditorActivity extends Activity implements ScoreView.Listener
         getWindow().getDecorView().setOnApplyWindowInsetsListener(insetsListener(top, col));
     }
 
-    private int navInset;
+    private int navInset, imeInset;
 
     private static final int LYRIC_BAR_DP = 56;
     private android.view.ViewTreeObserver.OnGlobalLayoutListener lyricBarListener;
@@ -477,7 +477,9 @@ public final class EditorActivity extends Activity implements ScoreView.Listener
         int[] loc = new int[2];
         root.getLocationOnScreen(loc);
         int keyboard = Math.max(0, loc[1] + root.getHeight() - frame.bottom);
-        int margin = Math.max(navInset, keyboard);
+        // the keyboard's height as reported by the window insets (needs adjustResize in the manifest),
+        // with the visible-frame measurement as a second source; the bar sits above the highest of them
+        int margin = Math.max(Math.max(navInset, imeInset), keyboard);
         View col = root.getChildAt(0);
         FrameLayout.LayoutParams lp = (FrameLayout.LayoutParams) lyricBar.getLayoutParams();
         if (lp.bottomMargin != margin || lp.leftMargin != col.getPaddingLeft() || lp.rightMargin != col.getPaddingRight()) {
@@ -501,7 +503,9 @@ public final class EditorActivity extends Activity implements ScoreView.Listener
                 top.setPadding(top.getPaddingLeft(), topBase + in.getSystemWindowInsetTop(), top.getPaddingRight(), top.getPaddingBottom());
                 col.setPadding(left, 0, right, 0);
                 navInset = in.getSystemWindowInsetBottom();
+                imeInset = Build.VERSION.SDK_INT >= 30 ? in.getInsets(android.view.WindowInsets.Type.ime()).bottom : 0;
                 applyBottomInset();
+                updateLyricBar();
                 return v.onApplyWindowInsets(in);
             }
         };

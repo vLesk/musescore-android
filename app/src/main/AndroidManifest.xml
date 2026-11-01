@@ -24,7 +24,7 @@
         <activity
             android:name=".ui.EditorActivity"
             android:exported="true"
-            android:windowSoftInputMode="adjustNothing"
+            android:windowSoftInputMode="adjustResize"
             android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboard|keyboardHidden|navigation">
             <!-- Open MuseScore and MusicXML files from file managers, mail and browsers -->
             <intent-filter android:label="@string/open_with">
