@@ -53,6 +53,14 @@ public final class HomeActivity extends Activity {
     private Adapter adapter;
     private GridView grid;
     private View empty;
+    private TextView noResults, sortRecent, sortTitle;
+    private android.widget.EditText query;
+    private View clearQuery;
+    private boolean sortByTitle;
+    private Ui.Snackbar snack;
+    private final List<ScoreStore.Entry> all = new ArrayList<ScoreStore.Entry>();
+    /** Ids hidden while their deletion can still be undone. */
+    private final java.util.Set<String> pendingDelete = new java.util.HashSet<String>();
     private final ExecutorService io = Executors.newSingleThreadExecutor();
     private final Handler handler = new Handler(Looper.getMainLooper());
 
@@ -85,8 +93,60 @@ public final class HomeActivity extends Activity {
         }));
         top.addView(bar);
         TextView big = Ui.text(this, getString(R.string.home_title), 32, t.onSurface, false);
-        big.setPadding(t.dp(16), 0, t.dp(16), t.dp(16));
+        big.setPadding(t.dp(16), 0, t.dp(16), t.dp(12));
         top.addView(big);
+        // Material 3 search bar: a full-width pill that filters the library as you type
+        LinearLayout search = Ui.row(this);
+        search.setBackground(Ui.round(t.surfaceContainerHigh, t.dp(28)));
+        search.setPadding(t.dp(16), 0, t.dp(8), 0);
+        android.widget.ImageView si = new android.widget.ImageView(this);
+        si.setImageResource(R.drawable.ic_search);
+        si.setImageTintList(android.content.res.ColorStateList.valueOf(t.onSurfaceVariant));
+        si.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
+        search.addView(si, Ui.lin(t.dp(24), t.dp(24)));
+        query = new android.widget.EditText(this);
+        query.setHint(R.string.search_scores);
+        query.setBackground(null);
+        query.setSingleLine(true);
+        query.setTextSize(16);
+        query.setTextColor(t.onSurface);
+        query.setHintTextColor(t.onSurfaceVariant);
+        query.setPadding(t.dp(12), 0, t.dp(8), 0);
+        query.setImeOptions(android.view.inputmethod.EditorInfo.IME_ACTION_SEARCH);
+        query.addTextChangedListener(new android.text.TextWatcher() {
+            @Override
+            public void beforeTextChanged(CharSequence s, int a, int b, int c) {
+            }
+
+            @Override
+            public void onTextChanged(CharSequence s, int a, int b, int c) {
+                applyFilter();
+            }
+
+            @Override
+            public void afterTextChanged(android.text.Editable e) {
+            }
+        });
+        search.addView(query, Ui.lin(0, t.dp(56), 1f));
+        clearQuery = Ui.icon(this, t, R.drawable.ic_close, getString(R.string.cancel), new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                query.setText("");
+            }
+        });
+        clearQuery.setVisibility(View.GONE);
+        search.addView(clearQuery);
+        LinearLayout.LayoutParams slp = Ui.lin(-1, t.dp(56));
+        slp.setMargins(t.dp(12), 0, t.dp(12), t.dp(8));
+        top.addView(search, slp);
+        // sort chips (filter chips, single select)
+        LinearLayout sorts = Ui.row(this);
+        sorts.setPadding(t.dp(16), 0, t.dp(16), t.dp(8));
+        sortRecent = sortChip(getString(R.string.sort_recent), true);
+        sortTitle = sortChip(getString(R.string.sort_title), false);
+        sorts.addView(sortRecent);
+        sorts.addView(sortTitle);
+        top.addView(sorts);
         col.addView(top);
 
         FrameLayout content = new FrameLayout(this);
@@ -104,6 +164,10 @@ public final class HomeActivity extends Activity {
         content.addView(grid, new FrameLayout.LayoutParams(-1, -1));
         empty = buildEmpty();
         content.addView(empty, Ui.frame(-1, -2, Gravity.CENTER));
+        noResults = Ui.text(this, "", 16, t.onSurfaceVariant, false);
+        noResults.setGravity(Gravity.CENTER);
+        noResults.setVisibility(View.GONE);
+        content.addView(noResults, Ui.frame(-1, -2, Gravity.TOP));
         col.addView(content, Ui.lin(-1, 0, 1f));
 
         // extended FAB
@@ -132,6 +196,8 @@ public final class HomeActivity extends Activity {
         fabHost.addView(fab, flp);
         root.addView(fabHost, new FrameLayout.LayoutParams(-1, -1));
         fabHost.setClickable(false);
+        snack = new Ui.Snackbar(fabHost, t);
+        snack.setBottomMargin(t.dp(72));
 
         setContentView(root);
         Ui.edgeToEdge(this, t, top, fabHost, col);
@@ -196,14 +262,103 @@ public final class HomeActivity extends Activity {
                 handler.post(new Runnable() {
                     @Override
                     public void run() {
-                        entries.clear();
-                        entries.addAll(list);
-                        adapter.notifyDataSetChanged();
-                        empty.setVisibility(entries.isEmpty() ? View.VISIBLE : View.GONE);
+                        all.clear();
+                        all.addAll(list);
+                        applyFilter();
                     }
                 });
             }
         });
+    }
+
+    private TextView sortChip(String label, boolean on) {
+        final TextView chip = Ui.text(this, label, 14, t.onSurfaceVariant, true);
+        chip.setGravity(Gravity.CENTER);
+        chip.setPadding(t.dp(16), 0, t.dp(16), 0);
+        chip.setMinHeight(t.dp(32));
+        chip.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                sortByTitle = v == sortTitle;
+                applyFilter();
+            }
+        });
+        LinearLayout.LayoutParams lp = Ui.lin(-2, t.dp(32));
+        lp.rightMargin = t.dp(8);
+        chip.setLayoutParams(lp);
+        styleChip(chip, on);
+        return chip;
+    }
+
+    private void styleChip(TextView chip, boolean on) {
+        chip.setBackground(on ? Ui.rippleRound(t, t.primaryContainer, 8) : Ui.ripple(t, Ui.roundStroke(0, t.outlineVariant, t.dp(1), t.dp(8)), true));
+        chip.setTextColor(on ? t.onPrimaryContainer : t.onSurfaceVariant);
+        chip.setSelected(on);
+    }
+
+    /** Applies search text, sort order and pending deletions to the visible list. */
+    private void applyFilter() {
+        String q = query.getText().toString().trim().toLowerCase();
+        clearQuery.setVisibility(q.isEmpty() ? View.GONE : View.VISIBLE);
+        styleChip(sortRecent, !sortByTitle);
+        styleChip(sortTitle, sortByTitle);
+        entries.clear();
+        for (ScoreStore.Entry e : all) {
+            if (pendingDelete.contains(e.id)) continue;
+            if (!q.isEmpty()) {
+                String hay = (e.title + " " + e.composer + " " + e.instruments).toLowerCase();
+                if (!hay.contains(q)) continue;
+            }
+            entries.add(e);
+        }
+        if (sortByTitle) {
+            java.util.Collections.sort(entries, new java.util.Comparator<ScoreStore.Entry>() {
+                @Override
+                public int compare(ScoreStore.Entry a, ScoreStore.Entry b) {
+                    return a.title.compareToIgnoreCase(b.title);
+                }
+            });
+        }
+        adapter.notifyDataSetChanged();
+        boolean libraryEmpty = all.size() == pendingDelete.size();
+        empty.setVisibility(libraryEmpty ? View.VISIBLE : View.GONE);
+        noResults.setText(getString(R.string.no_results, q));
+        noResults.setPadding(0, t.dp(48), 0, 0);
+        noResults.setVisibility(!libraryEmpty && entries.isEmpty() && !q.isEmpty() ? View.VISIBLE : View.GONE);
+    }
+
+    /** Deletes with an Undo snackbar instead of a confirmation dialog (the deletion is reversible until it times out). */
+    private void deleteWithUndo(final ScoreStore.Entry e) {
+        pendingDelete.add(e.id);
+        applyFilter();
+        final Runnable commit = new Runnable() {
+            @Override
+            public void run() {
+                if (pendingDelete.remove(e.id)) {
+                    store.delete(e.id);
+                    all.remove(e);
+                    applyFilter();
+                }
+            }
+        };
+        handler.postDelayed(commit, 5500);
+        snack.show(getString(R.string.score_deleted, e.title), getString(R.string.undo), new Runnable() {
+            @Override
+            public void run() {
+                handler.removeCallbacks(commit);
+                pendingDelete.remove(e.id);
+                applyFilter();
+            }
+        });
+    }
+
+    @Override
+    protected void onStop() {
+        super.onStop();
+        snack.dismiss();
+        // commit pending deletions when leaving the screen
+        for (String id : new ArrayList<String>(pendingDelete)) store.delete(id);
+        pendingDelete.clear();
     }
 
     private void open(String id) {
@@ -278,14 +433,7 @@ public final class HomeActivity extends Activity {
                         shareEntry(e);
                         return true;
                     case 4:
-                        new AlertDialog.Builder(HomeActivity.this).setMessage(getString(R.string.delete_confirm, e.title))
-                                .setPositiveButton(R.string.delete, new DialogInterface.OnClickListener() {
-                                    @Override
-                                    public void onClick(DialogInterface d, int w) {
-                                        store.delete(e.id);
-                                        reload();
-                                    }
-                                }).setNegativeButton(R.string.cancel, null).show();
+                        deleteWithUndo(e);
                         return true;
                     default:
                         return false;

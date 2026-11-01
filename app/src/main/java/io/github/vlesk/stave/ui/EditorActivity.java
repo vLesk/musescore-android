@@ -88,7 +88,15 @@ public final class EditorActivity extends Activity implements ScoreView.Listener
     private PianoView piano;
     private View pianoBox;
     private TextView titleView, statusView;
-    private ImageButton undoBtn, redoBtn, playBtn, fab, chordBtn, kbdBtn;
+    private ImageButton undoBtn, redoBtn, playBtn, chordBtn, kbdBtn;
+    private LinearLayout fab;
+    private android.widget.ImageView fabIcon;
+    private TextView fabLabel;
+    private FrameLayout content;
+    private HorizontalScrollView floatingBar;
+    private LinearLayout floatingRow, inputDock;
+    private View tipCard;
+    private Ui.Snackbar snack;
     private final TextView[] durBtns = new TextView[6];
     private static final int[] DUR_TYPES = {Duration.N32, Duration.N16, Duration.EIGHTH, Duration.QUARTER, Duration.HALF, Duration.WHOLE};
     private TextView dotBtn, tripletBtn;
@@ -242,7 +250,7 @@ public final class EditorActivity extends Activity implements ScoreView.Listener
         LinearLayout col = Ui.column(this);
         root.addView(col, new FrameLayout.LayoutParams(-1, -1));
 
-        // top app bar
+        // top app bar: navigation, title + live status line, undo/redo, play, overflow
         LinearLayout top = Ui.row(this);
         top.setPadding(t.dp(4), 0, t.dp(4), 0);
         top.setBackgroundColor(t.surface);
@@ -260,6 +268,7 @@ public final class EditorActivity extends Activity implements ScoreView.Listener
         statusView = Ui.text(this, "", 12, t.onSurfaceVariant, false);
         statusView.setSingleLine(true);
         statusView.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        statusView.setAccessibilityLiveRegion(View.ACCESSIBILITY_LIVE_REGION_POLITE);
         titles.addView(titleView);
         titles.addView(statusView);
         titles.setOnClickListener(new View.OnClickListener() {
@@ -302,47 +311,39 @@ public final class EditorActivity extends Activity implements ScoreView.Listener
         top.addView(more);
         col.addView(top, Ui.lin(-1, -2));
 
-        // score area with FAB
-        FrameLayout content = new FrameLayout(this);
+        // score area: score canvas + floating contextual toolbar + extended FAB + snackbars
+        content = new FrameLayout(this);
         view = new ScoreView(this, t);
         content.addView(view, new FrameLayout.LayoutParams(-1, -1));
-        fab = new ImageButton(this);
-        fab.setImageResource(R.drawable.ic_edit);
-        fab.setImageTintList(android.content.res.ColorStateList.valueOf(t.onPrimaryContainer));
-        fab.setBackground(Ui.rippleRound(t, t.primaryContainer, 16));
-        fab.setElevation(t.dp(6));
-        fab.setContentDescription(getString(R.string.note_input));
-        if (Build.VERSION.SDK_INT >= 26) fab.setTooltipText(getString(R.string.note_input));
-        fab.setOnClickListener(new View.OnClickListener() {
+        view.setScrollWatcher(new ScoreView.ScrollWatcher() {
             @Override
-            public void onClick(View v) {
-                setInputMode(!st.inputMode);
+            public void scrolled(float dy) {
+                if (Math.abs(dy) > t.dp(2)) setFabExtended(dy < 0);
             }
         });
-        FrameLayout.LayoutParams flp = Ui.frame(t.dp(56), t.dp(56), Gravity.BOTTOM | Gravity.END);
-        flp.setMargins(0, 0, t.dp(16), t.dp(16));
-        content.addView(fab, flp);
+        buildTip();
+        buildFloatingToolbar();
+        buildFab();
+        snack = new Ui.Snackbar(content, t);
         col.addView(content, Ui.lin(-1, 0, 1f));
 
-        // bottom toolbars
-        LinearLayout bottom = Ui.column(this);
-        bottom.setBackgroundColor(t.surfaceContainer);
-        bottom.addView(Ui.divider(this, t));
+        // docked note-input toolbar (only in note input mode)
+        inputDock = Ui.column(this);
+        inputDock.setBackgroundColor(t.surfaceContainer);
         LinearLayout rowA = Ui.row(this);
         LinearLayout rowB = Ui.row(this);
-        rowA.setPadding(t.dp(4), 0, t.dp(4), 0);
+        rowA.setPadding(t.dp(8), t.dp(6), t.dp(8), t.dp(2));
         rowB.setPadding(t.dp(4), 0, t.dp(4), 0);
         buildDurationRow(rowA);
-        buildActionRow(rowB);
+        buildInputTools(rowB);
         if (wide()) {
             LinearLayout both = Ui.row(this);
             both.addView(rowA);
-            both.addView(Ui.vDivider(this, t));
             both.addView(rowB);
-            bottom.addView(scroll(both));
+            inputDock.addView(scroll(both));
         } else {
-            bottom.addView(scroll(rowA));
-            bottom.addView(scroll(rowB));
+            inputDock.addView(scroll(rowA));
+            inputDock.addView(scroll(rowB));
         }
         LinearLayout pianoRow = Ui.row(this);
         pianoRow.addView(Ui.icon(this, t, R.drawable.ic_chevron_left, getString(R.string.octave_down), new View.OnClickListener() {
@@ -367,9 +368,9 @@ public final class EditorActivity extends Activity implements ScoreView.Listener
         }), new LinearLayout.LayoutParams(t.dp(40), -1));
         int ph = tablet ? 180 : (landscape ? 104 : 140);
         pianoBox = pianoRow;
-        pianoBox.setVisibility(View.GONE);
-        bottom.addView(pianoRow, Ui.lin(-1, t.dp(ph)));
-        col.addView(bottom, Ui.lin(-1, -2));
+        inputDock.addView(pianoRow, Ui.lin(-1, t.dp(ph)));
+        inputDock.setVisibility(View.GONE);
+        col.addView(inputDock, Ui.lin(-1, -2));
 
         // palette sheet host (overlay)
         sheetHost = new FrameLayout(this);
@@ -377,7 +378,48 @@ public final class EditorActivity extends Activity implements ScoreView.Listener
         root.addView(sheetHost, new FrameLayout.LayoutParams(-1, -1));
 
         setContentView(root);
-        Ui.edgeToEdge(this, t, top, bottom, col);
+        // system bar appearance from the shared helper; bottom insets go to the dock when it is
+        // shown, otherwise the floating elements are lifted above the navigation bar
+        Ui.edgeToEdge(this, t, top, null, col);
+        getWindow().getDecorView().setOnApplyWindowInsetsListener(insetsListener(top, col));
+    }
+
+    private int navInset;
+
+    @SuppressWarnings("deprecation")
+    private View.OnApplyWindowInsetsListener insetsListener(final View top, final View col) {
+        final int topBase = top.getPaddingTop();
+        return new View.OnApplyWindowInsetsListener() {
+            @Override
+            public android.view.WindowInsets onApplyWindowInsets(View v, android.view.WindowInsets in) {
+                int left = in.getSystemWindowInsetLeft(), right = in.getSystemWindowInsetRight();
+                if (Build.VERSION.SDK_INT >= 28 && in.getDisplayCutout() != null) {
+                    left = Math.max(left, in.getDisplayCutout().getSafeInsetLeft());
+                    right = Math.max(right, in.getDisplayCutout().getSafeInsetRight());
+                }
+                top.setPadding(top.getPaddingLeft(), topBase + in.getSystemWindowInsetTop(), top.getPaddingRight(), top.getPaddingBottom());
+                col.setPadding(left, 0, right, 0);
+                navInset = in.getSystemWindowInsetBottom();
+                applyBottomInset();
+                return v.onApplyWindowInsets(in);
+            }
+        };
+    }
+
+    /** The navigation-bar inset pads whichever surface touches the bottom edge. */
+    private void applyBottomInset() {
+        boolean dock = inputDock.getVisibility() == View.VISIBLE;
+        inputDock.setPadding(0, 0, 0, dock ? navInset : 0);
+        content.setPadding(0, 0, 0, 0);
+        int base = dock ? 0 : navInset;
+        FrameLayout.LayoutParams fl = (FrameLayout.LayoutParams) fab.getLayoutParams();
+        fl.bottomMargin = t.dp(16) + base;
+        fab.setLayoutParams(fl);
+        FrameLayout.LayoutParams tl = (FrameLayout.LayoutParams) floatingBar.getLayoutParams();
+        tl.bottomMargin = t.dp(16) + base;
+        floatingBar.setLayoutParams(tl);
+        boolean barShown = floatingBar.getVisibility() == View.VISIBLE;
+        snack.setBottomMargin(base + (barShown || fab.getVisibility() == View.VISIBLE ? t.dp(72) : 0));
     }
 
     private HorizontalScrollView scroll(View v) {
@@ -388,8 +430,328 @@ public final class EditorActivity extends Activity implements ScoreView.Listener
         return hs;
     }
 
+    // ------------------------------------------------------------------ extended FAB
+
+    private void buildFab() {
+        fab = Ui.row(this);
+        fab.setBackground(Ui.rippleRound(t, t.primaryContainer, 16));
+        fab.setElevation(t.dp(6));
+        fab.setPadding(t.dp(16), 0, t.dp(16), 0);
+        fab.setClickable(true);
+        fab.setFocusable(true);
+        fabIcon = new android.widget.ImageView(this);
+        fabIcon.setImageResource(R.drawable.ic_edit);
+        fabIcon.setImageTintList(android.content.res.ColorStateList.valueOf(t.onPrimaryContainer));
+        fab.addView(fabIcon, Ui.lin(t.dp(24), t.dp(24)));
+        fabLabel = Ui.text(this, getString(R.string.write), 16, t.onPrimaryContainer, true);
+        fabLabel.setPadding(t.dp(12), 0, t.dp(4), 0);
+        fab.addView(fabLabel);
+        fab.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                setInputMode(!st.inputMode);
+            }
+        });
+        FrameLayout.LayoutParams flp = Ui.frame(-2, t.dp(56), Gravity.BOTTOM | Gravity.END);
+        flp.setMargins(0, 0, t.dp(16), t.dp(16));
+        content.addView(fab, flp);
+    }
+
+    private boolean fabExtended = true;
+
+    /** Extended FAB collapses to an icon while scrolling down and expands again when scrolling up. */
+    private void setFabExtended(boolean extended) {
+        if (fab == null) return;
+        if (floatingBar != null && floatingBar.getVisibility() == View.VISIBLE) extended = false;
+        if (fabExtended == extended) return;
+        fabExtended = extended;
+        fabLabel.setVisibility(extended ? View.VISIBLE : View.GONE);
+    }
+
+    // ------------------------------------------------------------------ first-run tip
+
+    private void buildTip() {
+        final android.content.SharedPreferences prefs = getSharedPreferences("ui", MODE_PRIVATE);
+        if (prefs.getBoolean("tip_editor_seen", false)) return;
+        final LinearLayout card = Ui.column(this);
+        card.setBackground(Ui.round(t.surfaceContainerHigh, t.dp(16)));
+        card.setElevation(t.dp(2));
+        card.setPadding(t.dp(16), t.dp(14), t.dp(8), t.dp(4));
+        TextView title = Ui.text(this, getString(R.string.tip_title), 16, t.onSurface, true);
+        card.addView(title);
+        TextView body = Ui.text(this, getString(R.string.tip_body), 14, t.onSurfaceVariant, false);
+        body.setPadding(0, t.dp(4), t.dp(8), 0);
+        card.addView(body);
+        LinearLayout actions = Ui.row(this);
+        actions.addView(Ui.spacer(this));
+        actions.addView(Ui.button(this, t, getString(R.string.got_it), 2, new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                prefs.edit().putBoolean("tip_editor_seen", true).apply();
+                content.removeView(card);
+            }
+        }));
+        card.addView(actions);
+        FrameLayout.LayoutParams lp = Ui.frame(Math.min(t.dp(560), getResources().getDisplayMetrics().widthPixels - t.dp(32)), -2,
+                Gravity.TOP | Gravity.CENTER_HORIZONTAL);
+        lp.topMargin = t.dp(8);
+        content.addView(card, lp);
+        tipCard = card;
+    }
+
+    // ------------------------------------------------------------------ floating contextual toolbar
+
+    private void buildFloatingToolbar() {
+        floatingBar = new HorizontalScrollView(this);
+        floatingBar.setHorizontalScrollBarEnabled(false);
+        floatingBar.setBackground(Ui.round(t.surfaceContainerHigh, t.dp(28)));
+        floatingBar.setElevation(t.dp(6));
+        floatingRow = Ui.row(this);
+        floatingRow.setPadding(t.dp(6), t.dp(4), t.dp(6), t.dp(4));
+        floatingBar.addView(floatingRow);
+        FrameLayout.LayoutParams lp = Ui.frame(-2, -2, Gravity.BOTTOM | Gravity.START);
+        lp.setMargins(t.dp(16), 0, t.dp(16) + t.dp(56) + t.dp(12), t.dp(16));
+        floatingBar.setVisibility(View.GONE);
+        content.addView(floatingBar, lp);
+    }
+
+    /** Rebuilds the floating toolbar for the current kind of selection. */
+    private void updateFloatingToolbar() {
+        boolean show = !st.inputMode && st.hasSelection() && !paletteOpen();
+        floatingBar.setVisibility(show ? View.VISIBLE : View.GONE);
+        // the FAB pairs with the floating toolbar as a compact (icon-only) FAB
+        fabExtended = !show;
+        fabLabel.setVisibility(show ? View.GONE : View.VISIBLE);
+        if (!show) return;
+        floatingRow.removeAllViews();
+        final ChordRest cr = st.selectedChordRest();
+        if (st.selKind != EditorState.SEL_RANGE && cr != null) {
+            // split button: current duration, opens the duration group
+            final TextView dur = Ui.glyphButton(this, t, Sym.str(durGlyph(cr.type)) + (cr.dots > 0 ? Sym.str(Sym.metAugmentationDot) : ""),
+                    true, 20, getString(R.string.change_duration), null);
+            dur.setOnClickListener(new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    durationPopup(dur, cr);
+                }
+            });
+            dur.setLayoutParams(new LinearLayout.LayoutParams(t.dp(56), t.dp(48)));
+            dur.setBackground(Ui.rippleRound(t, t.primaryContainer, 24));
+            dur.setTextColor(t.onPrimaryContainer);
+            floatingRow.addView(dur);
+        }
+        if (st.selKind == EditorState.SEL_RANGE || cr instanceof Chord) {
+            floatingRow.addView(Ui.icon(this, t, R.drawable.ic_keyboard_arrow_up, getString(R.string.up), transposeClick(1)));
+            floatingRow.addView(Ui.icon(this, t, R.drawable.ic_keyboard_arrow_down, getString(R.string.down), transposeClick(-1)));
+        }
+        if (st.selKind == EditorState.SEL_NOTE && st.selectedNote() != null) {
+            final TextView acc = Ui.glyphButton(this, t, Sym.str(Sym.accidentalSharp), true, 20,
+                    getString(R.string.accidentals), null);
+            acc.setOnClickListener(new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    accidentalPopup(acc);
+                }
+            });
+            floatingRow.addView(acc);
+            floatingRow.addView(Ui.glyphButton(this, t, "⁀", false, 24, getString(R.string.tie), new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    if (!st.toggleTie()) snack.show(getString(R.string.tie_needs_same_pitch));
+                    refresh();
+                }
+            }));
+        }
+        if (st.selKind == EditorState.SEL_RANGE) {
+            floatingRow.addView(Ui.icon(this, t, R.drawable.ic_content_copy, getString(R.string.copy), new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    if (st.copy()) snack.show(getString(R.string.copied));
+                }
+            }));
+            floatingRow.addView(Ui.icon(this, t, R.drawable.ic_content_paste, getString(R.string.paste), new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    pasteWithUndo();
+                }
+            }));
+        }
+        floatingRow.addView(Ui.icon(this, t, R.drawable.ic_delete, getString(R.string.delete_selection), new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                deleteWithUndo();
+            }
+        }));
+        floatingRow.addView(Ui.icon(this, t, R.drawable.ic_palette, getString(R.string.palettes), new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                openPalette();
+            }
+        }));
+        final ImageButton moreBtn = Ui.icon(this, t, R.drawable.ic_more_vert, getString(R.string.more_actions), null);
+        moreBtn.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                selectionMenu(moreBtn);
+            }
+        });
+        floatingRow.addView(moreBtn);
+    }
+
+    private static int durGlyph(int type) {
+        switch (type) {
+            case Duration.WHOLE:
+                return Sym.metNoteWhole;
+            case Duration.HALF:
+                return Sym.metNoteHalfUp;
+            case Duration.QUARTER:
+                return Sym.metNoteQuarterUp;
+            case Duration.EIGHTH:
+                return Sym.metNote8thUp;
+            case Duration.N16:
+                return Sym.metNote16thUp;
+            default:
+                return Sym.metNote32ndUp;
+        }
+    }
+
+    private void durationPopup(View anchor, final ChordRest cr) {
+        List<Ui.PopupItem> items = new ArrayList<Ui.PopupItem>();
+        for (final int type : DUR_TYPES) {
+            items.add(new Ui.PopupItem(Sym.str(durGlyph(type)), true, Duration.label(type, 0), cr.type == type && cr.dots == 0, new Runnable() {
+                @Override
+                public void run() {
+                    st.dots = 0;
+                    st.setDuration(type);
+                    refresh();
+                }
+            }));
+        }
+        items.add(new Ui.PopupItem(Sym.str(Sym.metAugmentationDot), true, getString(R.string.dot), cr.dots > 0, new Runnable() {
+            @Override
+            public void run() {
+                st.durType = cr.type;
+                st.toggleDot();
+                refresh();
+            }
+        }));
+        Ui.popupGroup(anchor, t, items);
+    }
+
+    private void accidentalPopup(View anchor) {
+        int[] acc = {Sym.accidentalDoubleFlat, Sym.accidentalFlat, Sym.accidentalNatural, Sym.accidentalSharp, Sym.accidentalDoubleSharp};
+        int[] desc = {R.string.double_flat, R.string.flat, R.string.natural, R.string.sharp, R.string.double_sharp};
+        Note n = st.selectedNote();
+        int cur = n == null ? 99 : Pitch.alter(n.tpc);
+        List<Ui.PopupItem> items = new ArrayList<Ui.PopupItem>();
+        for (int i = 0; i < acc.length; i++) {
+            final int alter = i - 2;
+            items.add(new Ui.PopupItem(Sym.str(acc[i]), true, getString(desc[i]), cur == alter, new Runnable() {
+                @Override
+                public void run() {
+                    st.applyAccidental(alter);
+                    previewSelected();
+                    refresh();
+                }
+            }));
+        }
+        Ui.popupGroup(anchor, t, items);
+    }
+
+    private void selectionMenu(View anchor) {
+        PopupMenu pm = new PopupMenu(this, anchor);
+        Menu m = pm.getMenu();
+        boolean chord = st.selectedChordRest() instanceof Chord;
+        if (chord) m.add(0, 1, 0, R.string.lyrics);
+        m.add(0, 2, 0, R.string.chord_symbol);
+        m.add(0, 3, 0, R.string.staff_text);
+        if (chord) {
+            m.add(0, 4, 0, R.string.octave_up);
+            m.add(0, 5, 0, R.string.octave_down);
+        }
+        m.add(0, 6, 0, R.string.copy);
+        if (st.hasClipboard()) m.add(0, 7, 0, R.string.paste);
+        m.add(0, 8, 0, R.string.insert_measure);
+        m.add(0, 9, 0, R.string.delete_measures);
+        pm.setOnMenuItemClickListener(new PopupMenu.OnMenuItemClickListener() {
+            @Override
+            public boolean onMenuItemClick(MenuItem item) {
+                switch (item.getItemId()) {
+                    case 1:
+                        lyricsDialog();
+                        break;
+                    case 2:
+                        textDialog(getString(R.string.chord_symbol), 3);
+                        break;
+                    case 3:
+                        textDialog(getString(R.string.staff_text), 2);
+                        break;
+                    case 4:
+                        st.transpose(12);
+                        previewSelected();
+                        break;
+                    case 5:
+                        st.transpose(-12);
+                        previewSelected();
+                        break;
+                    case 6:
+                        if (st.copy()) snack.show(getString(R.string.copied));
+                        break;
+                    case 7:
+                        pasteWithUndo();
+                        break;
+                    case 8:
+                        st.insertMeasureBefore();
+                        break;
+                    case 9:
+                        int before = st.score.measures.size();
+                        st.deleteSelectedMeasures();
+                        if (st.score.measures.size() < before) undoSnack(getString(R.string.measures_deleted));
+                        break;
+                    default:
+                        return false;
+                }
+                refresh();
+                return true;
+            }
+        });
+        pm.show();
+    }
+
+    /** Deletes and offers Undo in a snackbar (instead of asking for confirmation). */
+    private void deleteWithUndo() {
+        if (st == null || !st.hasSelection()) return;
+        int rev = st.revision;
+        st.deleteSelection();
+        refresh();
+        if (st.revision != rev) undoSnack(getString(R.string.deleted));
+    }
+
+    private void pasteWithUndo() {
+        if (st == null || !st.hasClipboard()) {
+            snack.show(getString(R.string.nothing_to_paste));
+            return;
+        }
+        st.paste();
+        refresh();
+        undoSnack(getString(R.string.pasted));
+    }
+
+    private void undoSnack(String msg) {
+        snack.show(msg, getString(R.string.undo), new Runnable() {
+            @Override
+            public void run() {
+                if (st.canUndo()) st.undo();
+                refresh();
+            }
+        });
+    }
+
+    // ------------------------------------------------------------------ docked note-input toolbar
+
     private void buildDurationRow(LinearLayout row) {
         int[] glyphs = {Sym.metNote32ndUp, Sym.metNote16thUp, Sym.metNote8thUp, Sym.metNoteQuarterUp, Sym.metNoteHalfUp, Sym.metNoteWhole};
+        LinearLayout group = Ui.buttonGroup(this, t);
         for (int i = 0; i < DUR_TYPES.length; i++) {
             final int type = DUR_TYPES[i];
             durBtns[i] = Ui.glyphButton(this, t, Sym.str(glyphs[i]), true, 22, Duration.label(type, 0), new View.OnClickListener() {
@@ -400,8 +762,13 @@ public final class EditorActivity extends Activity implements ScoreView.Listener
                     refresh();
                 }
             });
-            row.addView(durBtns[i]);
+            durBtns[i].setLayoutParams(new LinearLayout.LayoutParams(t.dp(48), t.dp(44)));
+            group.addView(durBtns[i]);
         }
+        row.addView(group);
+        View gap = new View(this);
+        row.addView(gap, Ui.lin(t.dp(8), 1));
+        LinearLayout mods = Ui.buttonGroup(this, t);
         dotBtn = Ui.glyphButton(this, t, Sym.str(Sym.metAugmentationDot), true, 22, getString(R.string.dot), new View.OnClickListener() {
             @Override
             public void onClick(View v) {
@@ -410,28 +777,8 @@ public final class EditorActivity extends Activity implements ScoreView.Listener
                 refresh();
             }
         });
-        row.addView(dotBtn);
-        row.addView(Ui.vDivider(this, t));
-        row.addView(Ui.glyphButton(this, t, Sym.str(Sym.restQuarter), true, 20, getString(R.string.rest), new View.OnClickListener() {
-            @Override
-            public void onClick(View v) {
-                if (st == null) return;
-                if (st.inputMode) st.enterRest();
-                else st.deleteSelection();
-                refresh();
-                followCursor();
-            }
-        }));
-        row.addView(Ui.glyphButton(this, t, "⁀", false, 26, getString(R.string.tie), new View.OnClickListener() {
-            @Override
-            public void onClick(View v) {
-                if (st == null) return;
-                boolean ok = st.inputMode ? st.enterTie() : st.toggleTie();
-                if (!ok) toast(getString(R.string.nothing_selected));
-                refresh();
-                followCursor();
-            }
-        }));
+        dotBtn.setLayoutParams(new LinearLayout.LayoutParams(t.dp(48), t.dp(44)));
+        mods.addView(dotBtn);
         tripletBtn = Ui.glyphButton(this, t, Sym.str(Sym.tuplet3), true, 22, getString(R.string.triplet), new View.OnClickListener() {
             @Override
             public void onClick(View v) {
@@ -440,67 +787,48 @@ public final class EditorActivity extends Activity implements ScoreView.Listener
                 refresh();
             }
         });
-        row.addView(tripletBtn);
+        tripletBtn.setLayoutParams(new LinearLayout.LayoutParams(t.dp(48), t.dp(44)));
+        mods.addView(tripletBtn);
+        row.addView(mods);
     }
 
-    private void buildActionRow(LinearLayout row) {
-        int[] acc = {Sym.accidentalDoubleFlat, Sym.accidentalFlat, Sym.accidentalNatural, Sym.accidentalSharp, Sym.accidentalDoubleSharp};
-        int[] accDesc = {R.string.double_flat, R.string.flat, R.string.natural, R.string.sharp, R.string.double_sharp};
+    private void buildInputTools(LinearLayout row) {
+        row.addView(Ui.labeled(this, t, Ui.glyphButton(this, t, Sym.str(Sym.restQuarter), true, 20, getString(R.string.rest), new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                if (st == null) return;
+                st.enterRest();
+                refresh();
+                followCursor();
+            }
+        }), getString(R.string.rest)));
+        row.addView(Ui.labeled(this, t, Ui.glyphButton(this, t, "⁀", false, 24, getString(R.string.tie), new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                if (st == null) return;
+                if (!st.enterTie()) snack.show(getString(R.string.tie_needs_note));
+                refresh();
+                followCursor();
+            }
+        }), getString(R.string.tie)));
+        int[] acc = {Sym.accidentalFlat, Sym.accidentalNatural, Sym.accidentalSharp};
+        int[] accDesc = {R.string.flat, R.string.natural, R.string.sharp};
+        String[] accLabel = {"♭", "♮", "♯"};
         for (int i = 0; i < acc.length; i++) {
-            final int alter = i - 2;
-            row.addView(Ui.glyphButton(this, t, Sym.str(acc[i]), true, 20, getString(accDesc[i]), new View.OnClickListener() {
+            final int alter = i - 1;
+            row.addView(Ui.labeled(this, t, Ui.glyphButton(this, t, Sym.str(acc[i]), true, 20, getString(accDesc[i]), new View.OnClickListener() {
                 @Override
                 public void onClick(View v) {
                     if (st == null) return;
                     if (st.selectedNote() == null) {
-                        toast(getString(R.string.nothing_selected));
+                        snack.show(getString(R.string.nothing_selected));
                         return;
                     }
                     st.applyAccidental(alter);
                     previewSelected();
                     refresh();
                 }
-            }));
-        }
-        row.addView(Ui.vDivider(this, t));
-        row.addView(Ui.icon(this, t, R.drawable.ic_keyboard_arrow_up, getString(R.string.up), transposeClick(1)));
-        row.addView(Ui.icon(this, t, R.drawable.ic_keyboard_arrow_down, getString(R.string.down), transposeClick(-1)));
-        row.addView(Ui.icon(this, t, R.drawable.ic_keyboard_double_arrow_up, getString(R.string.octave_up), transposeClick(12)));
-        row.addView(Ui.icon(this, t, R.drawable.ic_keyboard_double_arrow_down, getString(R.string.octave_down), transposeClick(-12)));
-        row.addView(Ui.vDivider(this, t));
-        row.addView(Ui.icon(this, t, R.drawable.ic_chevron_left, getString(R.string.prev), new View.OnClickListener() {
-            @Override
-            public void onClick(View v) {
-                move(-1);
-            }
-        }));
-        row.addView(Ui.icon(this, t, R.drawable.ic_chevron_right, getString(R.string.next), new View.OnClickListener() {
-            @Override
-            public void onClick(View v) {
-                move(1);
-            }
-        }));
-        row.addView(Ui.icon(this, t, R.drawable.ic_backspace, getString(R.string.delete_selection), new View.OnClickListener() {
-            @Override
-            public void onClick(View v) {
-                if (st == null) return;
-                st.deleteSelection();
-                refresh();
-            }
-        }));
-        row.addView(Ui.vDivider(this, t));
-        for (int i = 0; i < 4; i++) {
-            final int v = i;
-            voiceBtns[i] = Ui.glyphButton(this, t, String.valueOf(i + 1), false, 16, getString(R.string.voice, i + 1), new View.OnClickListener() {
-                @Override
-                public void onClick(View vv) {
-                    if (st == null) return;
-                    st.setVoice(v);
-                    refresh();
-                }
-            });
-            voiceBtns[i].setLayoutParams(new LinearLayout.LayoutParams(t.dp(40), t.dp(48)));
-            row.addView(voiceBtns[i]);
+            }), getString(accDesc[i])));
         }
         chordBtn = Ui.icon(this, t, R.drawable.ic_add_box, getString(R.string.chord_mode), new View.OnClickListener() {
             @Override
@@ -510,7 +838,36 @@ public final class EditorActivity extends Activity implements ScoreView.Listener
                 refresh();
             }
         });
-        row.addView(chordBtn);
+        row.addView(Ui.labeled(this, t, chordBtn, getString(R.string.chord_short)));
+        // voices as a compact connected group
+        LinearLayout voices = Ui.buttonGroup(this, t);
+        for (int i = 0; i < 4; i++) {
+            final int v = i;
+            voiceBtns[i] = Ui.glyphButton(this, t, String.valueOf(i + 1), false, 15, getString(R.string.voice, i + 1), new View.OnClickListener() {
+                @Override
+                public void onClick(View vv) {
+                    if (st == null) return;
+                    st.setVoice(v);
+                    refresh();
+                }
+            });
+            voiceBtns[i].setLayoutParams(new LinearLayout.LayoutParams(t.dp(34), t.dp(36)));
+            voices.addView(voiceBtns[i]);
+        }
+        LinearLayout vcol = Ui.column(this);
+        vcol.setGravity(Gravity.CENTER_HORIZONTAL);
+        vcol.setPadding(t.dp(6), t.dp(4), t.dp(6), t.dp(4));
+        vcol.addView(voices);
+        TextView vl = Ui.text(this, getString(R.string.voice_short), 11, t.onSurfaceVariant, true);
+        vl.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
+        vcol.addView(vl);
+        row.addView(vcol);
+        row.addView(Ui.labeled(this, t, Ui.icon(this, t, R.drawable.ic_backspace, getString(R.string.delete_selection), new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                deleteWithUndo();
+            }
+        }), getString(R.string.delete)));
         kbdBtn = Ui.icon(this, t, R.drawable.ic_piano, getString(R.string.keyboard), new View.OnClickListener() {
             @Override
             public void onClick(View v) {
@@ -518,36 +875,19 @@ public final class EditorActivity extends Activity implements ScoreView.Listener
                 refresh();
             }
         });
-        row.addView(kbdBtn);
-        row.addView(Ui.vDivider(this, t));
-        row.addView(Ui.icon(this, t, R.drawable.ic_palette, getString(R.string.palettes), new View.OnClickListener() {
+        row.addView(Ui.labeled(this, t, kbdBtn, getString(R.string.keys_short)));
+        row.addView(Ui.labeled(this, t, Ui.icon(this, t, R.drawable.ic_palette, getString(R.string.palettes), new View.OnClickListener() {
             @Override
             public void onClick(View v) {
                 openPalette();
             }
-        }));
-        row.addView(Ui.icon(this, t, R.drawable.ic_text_fields, getString(R.string.lyrics), new View.OnClickListener() {
+        }), getString(R.string.palettes)));
+        row.addView(Ui.labeled(this, t, Ui.icon(this, t, R.drawable.ic_text_fields, getString(R.string.lyrics), new View.OnClickListener() {
             @Override
             public void onClick(View v) {
                 lyricsDialog();
             }
-        }));
-        row.addView(Ui.icon(this, t, R.drawable.ic_content_copy, getString(R.string.copy), new View.OnClickListener() {
-            @Override
-            public void onClick(View v) {
-                if (st != null && st.copy()) toast(getString(R.string.copied));
-                else toast(getString(R.string.nothing_selected));
-            }
-        }));
-        row.addView(Ui.icon(this, t, R.drawable.ic_content_paste, getString(R.string.paste), new View.OnClickListener() {
-            @Override
-            public void onClick(View v) {
-                if (st != null && st.hasClipboard()) {
-                    st.paste();
-                    refresh();
-                }
-            }
-        }));
+        }), getString(R.string.lyrics)));
     }
 
     private View.OnClickListener transposeClick(final int semis) {
@@ -573,20 +913,36 @@ public final class EditorActivity extends Activity implements ScoreView.Listener
         undoBtn.setAlpha(st.canUndo() ? 1f : 0.38f);
         redoBtn.setEnabled(st.canRedo());
         redoBtn.setAlpha(st.canRedo() ? 1f : 0.38f);
-        for (int i = 0; i < durBtns.length; i++) Ui.setToggled(t, durBtns[i], st.durType == DUR_TYPES[i]);
-        Ui.setToggled(t, dotBtn, st.dots > 0);
-        Ui.setToggled(t, tripletBtn, st.triplet);
+        for (int i = 0; i < durBtns.length; i++) Ui.setGroupSelected(t, durBtns[i], st.durType == DUR_TYPES[i]);
+        Ui.setGroupSelected(t, dotBtn, st.dots > 0);
+        Ui.setGroupSelected(t, tripletBtn, st.triplet);
         for (int i = 0; i < 4; i++) {
-            Ui.setToggled(t, voiceBtns[i], st.voice == i);
+            Ui.setGroupSelected(t, voiceBtns[i], st.voice == i);
             if (st.voice != i) voiceBtns[i].setTextColor(t.voice[i]);
         }
         Ui.setToggled(t, chordBtn, st.chordMode);
-        Ui.setToggled(t, kbdBtn, pianoVisible && st.inputMode);
-        pianoBox.setVisibility(st.inputMode && pianoVisible ? View.VISIBLE : View.GONE);
-        fab.setImageResource(st.inputMode ? R.drawable.ic_check : R.drawable.ic_edit);
+        Ui.setToggled(t, kbdBtn, pianoVisible);
+        boolean dockWas = inputDock.getVisibility() == View.VISIBLE;
+        inputDock.setVisibility(st.inputMode ? View.VISIBLE : View.GONE);
+        pianoBox.setVisibility(pianoVisible ? View.VISIBLE : View.GONE);
+        if (dockWas != st.inputMode) {
+            if (st.inputMode) {
+                inputDock.setTranslationY(t.dp(80));
+                inputDock.animate().translationY(0).setDuration(200).start();
+            }
+        }
+        fabIcon.setImageResource(st.inputMode ? R.drawable.ic_check : R.drawable.ic_edit);
+        fabLabel.setText(st.inputMode ? R.string.done : R.string.write);
         String fabDesc = getString(st.inputMode ? R.string.exit_note_input : R.string.note_input);
         fab.setContentDescription(fabDesc);
         if (Build.VERSION.SDK_INT >= 26) fab.setTooltipText(fabDesc);
+        if (st.inputMode && tipCard != null) {
+            getSharedPreferences("ui", MODE_PRIVATE).edit().putBoolean("tip_editor_seen", true).apply();
+            content.removeView(tipCard);
+            tipCard = null;
+        }
+        updateFloatingToolbar();
+        applyBottomInset();
         Note n = st.selectedNote();
         piano.setHighlight(n != null ? n.pitch : -1);
         if (st.revision != savedRevision) {
@@ -649,7 +1005,8 @@ public final class EditorActivity extends Activity implements ScoreView.Listener
     }
 
     private void toast(String s) {
-        Toast.makeText(this, s, Toast.LENGTH_SHORT).show();
+        if (snack != null) snack.show(s);
+        else Toast.makeText(this, s, Toast.LENGTH_SHORT).show();
     }
 
     // ------------------------------------------------------------------ input actions
@@ -993,6 +1350,7 @@ public final class EditorActivity extends Activity implements ScoreView.Listener
         int w = Math.min(maxW, getResources().getDisplayMetrics().widthPixels);
         sheetHost.addView(sheet, Ui.frame(w, -2, Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL));
         sheetHost.setVisibility(View.VISIBLE);
+        floatingBar.setVisibility(View.GONE);
         sheet.setTranslationY(h);
         sheet.animate().translationY(0).setDuration(250).start();
         updateBackCallback();
@@ -1002,7 +1360,7 @@ public final class EditorActivity extends Activity implements ScoreView.Listener
         sheetHost.setVisibility(View.GONE);
         sheetHost.removeAllViews();
         palette = null;
-        updateBackCallback();
+        refresh();
     }
 
     boolean paletteOpen() {

@@ -108,4 +108,25 @@
     <string name="move_down">Move down</string>
     <string name="add">Add</string>
     <string name="count">Number of measures</string>
+    <string name="write">Write</string>
+    <string name="tip_title">Write your first notes</string>
+    <string name="tip_body">Tap Write, pick a note value and play the keyboard, or touch the staff and slide to the pitch you want. Tap any note to edit it, and long-press to select whole measures.</string>
+    <string name="got_it">Got it</string>
+    <string name="change_duration">Change duration</string>
+    <string name="accidentals">Accidentals</string>
+    <string name="tie_needs_same_pitch">A tie needs the same pitch in the next note</string>
+    <string name="tie_needs_note">Enter a note first, then tie it</string>
+    <string name="more_actions">More actions</string>
+    <string name="nothing_to_paste">Copy something first</string>
+    <string name="pasted">Pasted</string>
+    <string name="deleted">Deleted</string>
+    <string name="measures_deleted">Measures deleted</string>
+    <string name="chord_short">Chord</string>
+    <string name="voice_short">Voice</string>
+    <string name="keys_short">Keys</string>
+    <string name="search_scores">Search scores</string>
+    <string name="sort_recent">Recent</string>
+    <string name="sort_title">A–Z</string>
+    <string name="score_deleted">\"%1$s\" deleted</string>
+    <string name="no_results">No scores match \"%1$s\"</string>
 </resources>

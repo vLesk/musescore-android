@@ -101,10 +101,19 @@ public class UiSmokeTest {
         layout(hc.get(), 1233, 2673);
         shot(hc.get(), "01-home-empty");
         createScore(hc.get());
+        createScore(hc.get());
         hc.pause().resume();
         Thread.sleep(300);
         ShadowLooper.idleMainLooper();
         shot(hc.get(), "02-home-list");
+        // search filters the library
+        android.widget.EditText q = find(hc.get().getWindow().getDecorView(), android.widget.EditText.class).get(0);
+        q.setText("zzz");
+        layout(hc.get(), 1233, 2673);
+        shot(hc.get(), "02b-home-search-empty");
+        q.setText("smoke");
+        layout(hc.get(), 1233, 2673);
+        shot(hc.get(), "02c-home-search");
 
         ActivityController<NewScoreActivity> nc = Robolectric.buildActivity(NewScoreActivity.class).setup();
         layout(nc.get(), 1233, 2673);
@@ -130,6 +139,12 @@ public class UiSmokeTest {
         layout(a, 1233, 2673);
         shot(a, "04-editor");
         View root = a.getWindow().getDecorView();
+        // select a note: the floating contextual toolbar appears
+        java.lang.reflect.Field stf = EditorActivity.class.getDeclaredField("st");
+        stf.setAccessible(true);
+        io.github.vlesk.stave.edit.EditorState es = (io.github.vlesk.stave.edit.EditorState) stf.get(a);
+        Method refresh = EditorActivity.class.getDeclaredMethod("refresh");
+        refresh.setAccessible(true);
         // enter note input with the FAB and play some notes on the piano
         View fab = byDesc(root, "Note input");
         assertNotNull(fab);
@@ -158,6 +173,22 @@ public class UiSmokeTest {
         byDesc(root, "Add to chord").performClick();
         layout(a, 1233, 2673);
         shot(a, "05-note-input");
+        // leave note input and edit a note through the floating toolbar
+        byDesc(root, "Finish note input").performClick();
+        es.selectNote(new io.github.vlesk.stave.model.Pos(0, 0, 0, 480), 0);
+        refresh.invoke(a);
+        layout(a, 1233, 2673);
+        shot(a, "05b-floating-toolbar");
+        byDesc(root, "Pitch up").performClick();
+        byDesc(root, "Delete").performClick();
+        layout(a, 1233, 2673);
+        shot(a, "05c-undo-snackbar");
+        es.selectMeasure(1, 0);
+        refresh.invoke(a);
+        byDesc(root, "Copy").performClick();
+        layout(a, 1233, 2673);
+        shot(a, "05d-range-toolbar");
+        byDesc(root, "Note input").performClick();
         // hardware keyboard shortcuts
         a.onKeyDown(KeyEvent.KEYCODE_C, new KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_C));
         a.onKeyDown(KeyEvent.KEYCODE_DPAD_UP, new KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_DPAD_UP));

@@ -255,4 +255,188 @@ public final class Ui {
     public static LinearLayout.LayoutParams lin(int w, int h, float weight) {
         return new LinearLayout.LayoutParams(w, h, weight);
     }
+
+    // ------------------------------------------------------------------ Material 3 Expressive pieces
+
+    /** Inverse-surface colours used by snackbars (Material: inverseSurface / inverseOnSurface / inversePrimary). */
+    static int inverseSurface(Theme t) {
+        return t.dark ? 0xFFE3E2E9 : 0xFF2F3036;
+    }
+
+    static int inverseOnSurface(Theme t) {
+        return t.dark ? 0xFF2F3036 : 0xFFF2F0F7;
+    }
+
+    static int inversePrimary(Theme t) {
+        return t.dark ? Theme.blend(t.primary, 0xFF000000, 0.35f) : Theme.blend(t.primary, 0xFFFFFFFF, 0.55f);
+    }
+
+    /**
+     * Snackbar: brief feedback at the bottom of a FrameLayout host with at most one action
+     * (typically "Undo"), following Material's guidance to offer undo instead of confirming
+     * reversible actions.
+     */
+    public static final class Snackbar {
+        private final FrameLayout host;
+        private final Theme t;
+        private LinearLayout current;
+        private final android.os.Handler handler = new android.os.Handler(android.os.Looper.getMainLooper());
+        private int bottomMarginPx;
+
+        public Snackbar(FrameLayout host, Theme t) {
+            this.host = host;
+            this.t = t;
+        }
+
+        public void setBottomMargin(int px) {
+            bottomMarginPx = px;
+            if (current != null) {
+                FrameLayout.LayoutParams lp = (FrameLayout.LayoutParams) current.getLayoutParams();
+                lp.bottomMargin = px;
+                current.setLayoutParams(lp);
+            }
+        }
+
+        public void show(String text) {
+            show(text, null, null);
+        }
+
+        public void show(String text, String action, final Runnable onAction) {
+            dismiss();
+            Context c = host.getContext();
+            final LinearLayout bar = row(c);
+            bar.setBackground(round(inverseSurface(t), t.dp(4)));
+            bar.setElevation(t.dp(6));
+            bar.setPadding(t.dp(16), 0, t.dp(8), 0);
+            bar.setMinimumHeight(t.dp(48));
+            TextView msg = text(c, text, 14, inverseOnSurface(t), false);
+            msg.setMaxLines(2);
+            msg.setPadding(0, t.dp(14), t.dp(8), t.dp(14));
+            bar.addView(msg, lin(0, -2, 1f));
+            if (action != null) {
+                TextView a = text(c, action, 14, inversePrimary(t), true);
+                a.setGravity(Gravity.CENTER);
+                a.setMinHeight(t.dp(48));
+                a.setMinWidth(t.dp(48));
+                a.setPadding(t.dp(12), 0, t.dp(12), 0);
+                a.setBackground(rippleRound(t, 0, 20));
+                a.setOnClickListener(new View.OnClickListener() {
+                    @Override
+                    public void onClick(View v) {
+                        dismiss();
+                        if (onAction != null) onAction.run();
+                    }
+                });
+                bar.addView(a);
+            }
+            FrameLayout.LayoutParams lp = frame(Math.min(t.dp(600), host.getWidth() > 0 ? host.getWidth() - t.dp(32) : -1), -2,
+                    Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL);
+            lp.leftMargin = t.dp(16);
+            lp.rightMargin = t.dp(16);
+            lp.bottomMargin = bottomMarginPx + t.dp(12);
+            host.addView(bar, lp);
+            bar.setAlpha(0f);
+            bar.setTranslationY(t.dp(16));
+            bar.animate().alpha(1f).translationY(0).setDuration(180).start();
+            bar.setAccessibilityLiveRegion(View.ACCESSIBILITY_LIVE_REGION_POLITE);
+            current = bar;
+            handler.removeCallbacksAndMessages(null);
+            handler.postDelayed(new Runnable() {
+                @Override
+                public void run() {
+                    dismiss();
+                }
+            }, action != null ? 5000 : 2800);
+        }
+
+        public void dismiss() {
+            handler.removeCallbacksAndMessages(null);
+            if (current != null) {
+                final View v = current;
+                current = null;
+                v.animate().alpha(0f).setDuration(150).withEndAction(new Runnable() {
+                    @Override
+                    public void run() {
+                        host.removeView(v);
+                    }
+                }).start();
+            }
+        }
+    }
+
+    /**
+     * Connected button group (Material 3 Expressive): a single-select set of buttons sharing one
+     * container; the selected button morphs into a filled pill.
+     */
+    public static LinearLayout buttonGroup(Context c, Theme t) {
+        LinearLayout g = row(c);
+        g.setBackground(round(t.surfaceContainerHigh, t.dp(24)));
+        g.setPadding(t.dp(2), t.dp(2), t.dp(2), t.dp(2));
+        return g;
+    }
+
+    public static void setGroupSelected(Theme t, TextView v, boolean on) {
+        v.setBackground(on ? rippleRound(t, t.primary, 22) : rippleRound(t, 0x00000000, 8));
+        v.setTextColor(on ? t.onPrimary : t.onSurfaceVariant);
+        v.setSelected(on);
+        if (Build.VERSION.SDK_INT >= 30) v.setStateDescription(on ? "selected" : "not selected");
+    }
+
+    /** A tool button with a short text label underneath (labels make toolbars self-explanatory). */
+    public static LinearLayout labeled(Context c, Theme t, View button, String label) {
+        LinearLayout col = column(c);
+        col.setGravity(Gravity.CENTER_HORIZONTAL);
+        ViewGroup.LayoutParams blp = button.getLayoutParams();
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(blp != null ? blp.width : t.dp(TOUCH_DP), t.dp(40));
+        col.addView(button, lp);
+        TextView l = text(c, label, 11, t.onSurfaceVariant, true);
+        l.setGravity(Gravity.CENTER);
+        l.setSingleLine(true);
+        l.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
+        col.addView(l, new LinearLayout.LayoutParams(-2, -2));
+        col.setMinimumWidth(t.dp(56));
+        col.setPadding(t.dp(2), t.dp(2), t.dp(2), t.dp(4));
+        return col;
+    }
+
+    /** One entry of a popup button group. */
+    public static final class PopupItem {
+        final String glyph, desc;
+        final boolean music, selected;
+        final Runnable action;
+
+        public PopupItem(String glyph, boolean music, String desc, boolean selected, Runnable action) {
+            this.glyph = glyph;
+            this.music = music;
+            this.desc = desc;
+            this.selected = selected;
+            this.action = action;
+        }
+    }
+
+    /** Shows a small floating button group above an anchor (used by split buttons in the floating toolbar). */
+    public static android.widget.PopupWindow popupGroup(View anchor, Theme t, java.util.List<PopupItem> items) {
+        Context c = anchor.getContext();
+        LinearLayout g = row(c);
+        g.setBackground(round(t.surfaceContainerHigh, t.dp(28)));
+        g.setPadding(t.dp(6), t.dp(6), t.dp(6), t.dp(6));
+        final android.widget.PopupWindow pw = new android.widget.PopupWindow(g, -2, -2, true);
+        for (final PopupItem it : items) {
+            TextView b = glyphButton(c, t, it.glyph, it.music, it.music ? 22 : 16, it.desc, new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    pw.dismiss();
+                    it.action.run();
+                }
+            });
+            setGroupSelected(t, b, it.selected);
+            g.addView(b);
+        }
+        pw.setElevation(t.dp(8));
+        pw.setOutsideTouchable(true);
+        g.measure(View.MeasureSpec.UNSPECIFIED, View.MeasureSpec.UNSPECIFIED);
+        int x = -(g.getMeasuredWidth() - anchor.getWidth()) / 2;
+        pw.showAsDropDown(anchor, x, -anchor.getHeight() - g.getMeasuredHeight() - t.dp(12));
+        return pw;
+    }
 }

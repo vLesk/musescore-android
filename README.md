@@ -6,15 +6,15 @@ tablets. It reads and writes MuseScore's own file format (`.mscz` / `.mscx`), us
 note input mode, palettes, voices, and MuseScore's keyboard shortcuts. The desktop interface was
 redesigned for touch screens.
 
-> **Download:** [`dist/stave-1.0.0.apk`](dist/stave-1.0.0.apk) (Android 7.0+, targets Android 15).
+> **Download:** [`dist/stave-1.1.0.apk`](dist/stave-1.1.0.apk) (Android 7.0+, targets Android 15).
 > Enable *Install unknown apps* for your browser or file manager, then open the APK.
 
 *Unofficial project. "MuseScore" is a trademark of Muse Group, and this app is not affiliated
 with or endorsed by Muse Group, so it ships under its own name.*
 
-| Library | New score | Editor (imported .mscx) | Note input | Palettes |
+| Library | Editor (imported .mscx) | Floating toolbar | Note input | Palettes |
 |---|---|---|---|---|
-| ![](docs/screenshots/library.png) | ![](docs/screenshots/new-score.png) | ![](docs/screenshots/editor-imported.png) | ![](docs/screenshots/note-input.png) | ![](docs/screenshots/palettes.png) |
+| ![](docs/screenshots/library.png) | ![](docs/screenshots/editor-imported.png) | ![](docs/screenshots/floating-toolbar.png) | ![](docs/screenshots/note-input.png) | ![](docs/screenshots/palettes.png) |
 
 *Screenshots come from the Robolectric UI tests, rendered with Android's real graphics stack on the JVM.*
 
@@ -59,8 +59,8 @@ patterns (Soundslice's tablet piano mode, Sibelius for mobile):
   colors) and a full **dark theme**. The score paper also goes dark.
 * **48 dp minimum touch targets** everywhere. Palette cells are 76 dp. Taps on notes are matched with a
   "fat-finger" tolerance radius, so you don't need pixel precision.
-* **Primary actions in the thumb zone:** a bottom toolbar, a bottom piano keyboard and a FAB toggle for note
-  input. The top bar only holds undo/redo, play and the overflow menu.
+* **Primary actions in the thumb zone.** Note input happens in a docked toolbar and piano at the
+  bottom, and everything else is in the overflow menu or the floating toolbar.
 * **Edge-to-edge** layout with correct system-bar and display-cutout insets, as Android 15 requires
   for apps targeting API 35.
 * **Predictive back** (`OnBackInvokedCallback` on Android 13+). Back closes the palette, leaves
@@ -78,6 +78,21 @@ patterns (Soundslice's tablet piano mode, Sibelius for mobile):
   undo history keeps 80 steps.
 * **Accessibility:** content descriptions and tooltips on all controls, state descriptions on toggles,
   TalkBack pitch announcements on the piano keyboard, and sp-based text.
+
+### Design patterns adopted from reference apps
+
+| Pattern | Where it comes from | In Stave |
+|---|---|---|
+| **Tools fade away so the music is in focus** | forScore's "clean interface … then fades away" | With nothing selected, the editor shows only the score and an extended **Write** FAB. The FAB shrinks to an icon while you scroll |
+| **Floating toolbar for contextual actions, paired with a FAB** | Material 3 Expressive toolbars | Selecting a note shows a floating pill with duration, pitch ▲▼, accidentals, tie, delete, palettes and more. Selecting a range shows transpose, copy, paste and delete. The FAB collapses beside it |
+| **Docked toolbar for the active mode** | Material 3 Expressive (the docked toolbar replaces the bottom app bar) | Note input mode has a docked toolbar above the piano keyboard |
+| **Connected button groups / split buttons** | Material 3 Expressive | Durations, dot/triplet and voices are connected single-select groups whose selection morphs into a filled pill. The duration and accidental buttons in the floating toolbar open small button groups |
+| **Labelled tools** | StaffPad reviewers found its unlabelled toolbar confusing | Every note-input tool has a text label (Rest, Tie, Flat, Chord, Voice, Keys …) |
+| **Tap a note, then change it right there** | Flat's mobile editor ("tap a note again to change its length or delete it") | The floating toolbar edits the selected note in place |
+| **Touch piano + tap-the-staff entry** | Flat, Soundslice, Dorico for iPad | Piano keyboard, plus a ghost note with a pitch bubble when you touch the staff |
+| **Undo instead of confirmation** | Material confirmation guidance: reversible actions don't need dialogs | Deleting notes, measures or library scores, and pasting, show a snackbar with **Undo**. Toasts are replaced by snackbars |
+| **Search bar + filter chips** | Material 3 search bar | The library has a search pill (title, composer, instruments) and Recent / A–Z chips |
+| **One-time coach mark** | Common onboarding pattern | A dismissible "Write your first notes" card on first open |
 
 ## Building
 

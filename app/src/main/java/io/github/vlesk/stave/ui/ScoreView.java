@@ -221,7 +221,19 @@ public final class ScoreView extends View {
         scrollYPx = Math.max(0, Math.min(maxScroll(), scrollYPx));
     }
 
+    /** Notified about user scrolling (used to collapse the extended FAB, like Material apps do). */
+    public interface ScrollWatcher {
+        void scrolled(float dy);
+    }
+
+    private ScrollWatcher scrollWatcher;
+
+    public void setScrollWatcher(ScrollWatcher w) {
+        scrollWatcher = w;
+    }
+
     private void scrollBy(float dy) {
+        if (scrollWatcher != null) scrollWatcher.scrolled(dy);
         scrollYPx += dy;
         clampScroll();
         invalidate();
