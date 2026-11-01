@@ -678,7 +678,7 @@ public final class EditorActivity extends Activity implements ScoreView.Listener
             public boolean onMenuItemClick(MenuItem item) {
                 switch (item.getItemId()) {
                     case 1:
-                        lyricsDialog();
+                        startLyricEntry();
                         break;
                     case 2:
                         textDialog(getString(R.string.chord_symbol), 3);
@@ -885,7 +885,7 @@ public final class EditorActivity extends Activity implements ScoreView.Listener
         row.addView(Ui.labeled(this, t, Ui.icon(this, t, R.drawable.ic_text_fields, getString(R.string.lyrics), new View.OnClickListener() {
             @Override
             public void onClick(View v) {
-                lyricsDialog();
+                startLyricEntry();
             }
         }), getString(R.string.lyrics)));
     }
@@ -906,6 +906,8 @@ public final class EditorActivity extends Activity implements ScoreView.Listener
 
     private void refresh() {
         if (st == null) return;
+        if (st.lyricEdit && st.selKind != EditorState.SEL_CHORDREST) st.endLyric();
+        syncLyricInput();
         view.refresh();
         titleView.setText(st.score.title);
         statusView.setText(statusText());
@@ -953,6 +955,7 @@ public final class EditorActivity extends Activity implements ScoreView.Listener
     }
 
     private String statusText() {
+        if (st.lyricEdit) return "Lyrics \u00b7 Space or Enter: next note \u00b7 Esc: done";
         StringBuilder sb = new StringBuilder();
         if (st.inputMode && st.cursor != null) {
             sb.append(getString(R.string.note_input)).append(" · ");
@@ -1058,6 +1061,11 @@ public final class EditorActivity extends Activity implements ScoreView.Listener
         synth.play(pitch);
         refresh();
         followCursor();
+    }
+
+    @Override
+    public void onLyricChanged() {
+        refresh();
     }
 
     @Override
@@ -1523,7 +1531,7 @@ public final class EditorActivity extends Activity implements ScoreView.Listener
             text.add(new PaletteView.Cell("la", false, "Lyrics", a.getString(R.string.lyrics), new Runnable() {
                 @Override
                 public void run() {
-                    a.lyricsDialog();
+                    a.startLyricEntry();
                 }
             }));
             cats.add(text);
@@ -1647,51 +1655,60 @@ public final class EditorActivity extends Activity implements ScoreView.Listener
         showWithKeyboard(d, e);
     }
 
-    void lyricsDialog() {
+    /** Starts typing the lyric of the selected chord directly on the score. */
+    void startLyricEntry() {
         ChordRest cr = st == null ? null : st.selectedChordRest();
         if (!(cr instanceof Chord)) {
             toast(getString(R.string.nothing_selected));
             return;
         }
-        LinearLayout body = dialogBody();
-        final EditText e = Ui.input(this, t, getString(R.string.lyrics), cr.lyric == null ? "" : cr.lyric);
-        e.setImeOptions(EditorInfo.IME_ACTION_NEXT);
-        TextView hint = Ui.text(this, "End a syllable with \"-\" to hyphenate. Next moves to the following note.", 12, t.onSurfaceVariant, false);
-        body.addView(e, Ui.lin(-1, -2));
-        body.addView(hint);
-        final AlertDialog d = new AlertDialog.Builder(this).setTitle(getString(R.string.lyrics) + " · m. " + st.score.measureNumber(st.selPos.measure))
-                .setView(body)
-                .setPositiveButton(R.string.done, new DialogInterface.OnClickListener() {
-                    @Override
-                    public void onClick(DialogInterface dd, int w) {
-                        st.setLyric(e.getText().toString());
-                        refresh();
-                    }
-                })
-                .setNeutralButton(R.string.next_syllable, new DialogInterface.OnClickListener() {
-                    @Override
-                    public void onClick(DialogInterface dd, int w) {
-                        nextLyric(e.getText().toString());
-                    }
-                })
-                .setNegativeButton(R.string.cancel, null).create();
-        e.setOnEditorActionListener(new TextView.OnEditorActionListener() {
-            @Override
-            public boolean onEditorAction(TextView v, int actionId, KeyEvent ev) {
-                d.dismiss();
-                nextLyric(e.getText().toString());
-                return true;
-            }
-        });
-        showWithKeyboard(d, e);
+        st.beginLyric(st.selPos);
+        refresh();
     }
 
-    private void nextLyric(String text) {
-        st.setLyric(text);
-        boolean more = st.selectNextChord();
-        refresh();
-        followCursor();
-        if (more) lyricsDialog();
+    /** Keys while typing a lyric. Returns false for shortcuts (Ctrl/Alt/Meta), which keep their meaning. */
+    private boolean lyricKey(int keyCode, KeyEvent e) {
+        if (e.isCtrlPressed() || e.isAltPressed() || e.isMetaPressed()) return false;
+        switch (keyCode) {
+            case KeyEvent.KEYCODE_ESCAPE:
+                st.endLyric();
+                return true;
+            case KeyEvent.KEYCODE_SPACE:
+            case KeyEvent.KEYCODE_ENTER:
+            case KeyEvent.KEYCODE_NUMPAD_ENTER:
+                st.lyricNext();
+                return true;
+            case KeyEvent.KEYCODE_DEL:
+                st.lyricBackspace();
+                return true;
+            case KeyEvent.KEYCODE_DPAD_UP:
+            case KeyEvent.KEYCODE_DPAD_DOWN:
+            case KeyEvent.KEYCODE_DPAD_LEFT:
+            case KeyEvent.KEYCODE_DPAD_RIGHT:
+                return true; // arrows do nothing while typing, so they don't move the note selection
+            default:
+                int uc = e.getUnicodeChar();
+                if (uc >= 32 && !Character.isISOControl(uc)) {
+                    st.lyricType(new String(Character.toChars(uc)));
+                    return true;
+                }
+                return false;
+        }
+    }
+
+    private boolean lyricInputOn;
+
+    /** Shows the on-screen keyboard while a lyric is being typed, and hides it afterwards. */
+    private void syncLyricInput() {
+        if (st == null || view == null) return;
+        boolean on = st.lyricEdit;
+        if (on && !lyricInputOn) {
+            lyricInputOn = true;
+            view.startLyricInput();
+        } else if (!on && lyricInputOn) {
+            lyricInputOn = false;
+            view.stopLyricInput();
+        }
     }
 
     private void showWithKeyboard(AlertDialog d, EditText e) {
@@ -1986,6 +2003,10 @@ public final class EditorActivity extends Activity implements ScoreView.Listener
     @Override
     public boolean onKeyDown(int keyCode, KeyEvent e) {
         if (st == null) return super.onKeyDown(keyCode, e);
+        if (st.lyricEdit && lyricKey(keyCode, e)) {
+            refresh();
+            return true;
+        }
         boolean ctrl = e.isCtrlPressed(), shift = e.isShiftPressed(), alt = e.isAltPressed();
         boolean handled = true;
         if (ctrl && alt && keyCode >= KeyEvent.KEYCODE_1 && keyCode <= KeyEvent.KEYCODE_4) {
@@ -2102,12 +2123,15 @@ public final class EditorActivity extends Activity implements ScoreView.Listener
     // ------------------------------------------------------------------ back navigation (predictive back aware)
 
     private boolean wantsBack() {
-        return st != null && (paletteOpen() || st.inputMode || st.hasSelection());
+        return st != null && (paletteOpen() || st.lyricEdit || st.inputMode || st.hasSelection());
     }
 
     private void handleBack() {
         if (paletteOpen()) closePalette();
-        else if (st != null && st.inputMode) setInputMode(false);
+        else if (st != null && st.lyricEdit) {
+            st.endLyric();
+            refresh();
+        } else if (st != null && st.inputMode) setInputMode(false);
         else if (st != null && st.hasSelection()) {
             st.clearSelection();
             refresh();

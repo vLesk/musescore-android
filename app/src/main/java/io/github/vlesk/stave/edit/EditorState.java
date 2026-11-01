@@ -78,6 +78,7 @@ public final class EditorState {
     }
 
     public void undo() {
+        endLyric();
         if (undo.isEmpty()) return;
         redo.add(score);
         score = undo.remove(undo.size() - 1);
@@ -85,6 +86,7 @@ public final class EditorState {
     }
 
     public void redo() {
+        endLyric();
         if (redo.isEmpty()) return;
         undo.add(score);
         score = redo.remove(redo.size() - 1);
@@ -546,6 +548,165 @@ public final class EditorState {
         if (cr == null) return;
         checkpoint();
         cr.staffText = text == null || text.trim().isEmpty() ? null : text.trim();
+        changed();
+    }
+
+    // ------------------------------------------------------------------ inline lyric entry
+
+    /**
+     * True while lyrics are typed on the score. The text being typed is the selected chord's own
+     * lyric, so layout and drawing need no separate draft.
+     */
+    public boolean lyricEdit;
+    /** Trailing characters of the lyric that an input method is still composing. */
+    private int lyricComposing;
+    /** The next change to a lyric first takes an undo step (one step per syllable). */
+    private boolean lyricUndoPending;
+
+    private Chord lyricChord() {
+        ChordRest cr = selectedChordRest();
+        return cr instanceof Chord ? (Chord) cr : null;
+    }
+
+    private void lyricBeforeChange() {
+        if (lyricUndoPending) {
+            checkpoint();
+            lyricUndoPending = false;
+        }
+    }
+
+    /** Drops an empty syllable, so no empty lyric is kept. */
+    private void lyricFinish(Chord c) {
+        lyricComposing = 0;
+        if (c == null || c.lyric == null) return;
+        String t = c.lyric.trim();
+        c.lyric = t.isEmpty() ? null : t;
+    }
+
+    /** Removes the text an input method is still composing. */
+    private void lyricDropComposing() {
+        Chord c = lyricChord();
+        if (c != null && c.lyric != null && lyricComposing > 0) {
+            c.lyric = c.lyric.substring(0, Math.max(0, c.lyric.length() - lyricComposing));
+        }
+        lyricComposing = 0;
+    }
+
+    /** Starts typing the lyric of the chord at p. An existing lyric is continued at its end. */
+    public boolean beginLyric(Pos p) {
+        if (p == null) return false;
+        ChordRest cr = ScoreEdit.elementAt(score, p);
+        if (!(cr instanceof Chord)) return false;
+        if (lyricEdit) lyricFinish(lyricChord());
+        selKind = SEL_CHORDREST;
+        selPos = p.copy();
+        selNote = -1;
+        if (cr.lyric == null) cr.lyric = "";
+        lyricEdit = true;
+        lyricComposing = 0;
+        lyricUndoPending = true;
+        changed();
+        return true;
+    }
+
+    /** Ends the current syllable and moves to the next chord. Ends lyric entry after the last chord. */
+    public boolean lyricNext() {
+        return lyricMove(true);
+    }
+
+    private boolean lyricMove(boolean forward) {
+        if (!lyricEdit) return false;
+        lyricDropComposing();
+        lyricFinish(lyricChord());
+        Pos p = selPos;
+        while (p != null) {
+            p = forward ? ScoreEdit.next(score, p) : ScoreEdit.prev(score, p);
+            if (p == null) break;
+            ChordRest cr = ScoreEdit.elementAt(score, p);
+            if (cr instanceof Chord) {
+                selKind = SEL_CHORDREST;
+                selPos = p;
+                selNote = -1;
+                if (cr.lyric == null) cr.lyric = "";
+                lyricUndoPending = true;
+                changed();
+                return true;
+            }
+        }
+        // no further chord: stop typing and keep the last syllable selected
+        lyricEdit = false;
+        lyricUndoPending = false;
+        changed();
+        return false;
+    }
+
+    /** Types text into the lyric. A space or newline ends the syllable, as in MuseScore. */
+    public void lyricType(CharSequence text) {
+        if (!lyricEdit || text == null) return;
+        lyricDropComposing();
+        for (int i = 0; i < text.length(); i++) {
+            char ch = text.charAt(i);
+            if (ch == ' ' || ch == '\n') {
+                lyricMove(true);
+                if (!lyricEdit) return;
+            } else if (!Character.isISOControl(ch)) {
+                Chord c = lyricChord();
+                if (c == null) return;
+                lyricBeforeChange();
+                c.lyric = (c.lyric == null ? "" : c.lyric) + ch;
+                changed();
+            }
+        }
+    }
+
+    /** Shows the text an input method is composing (replaces the previous composing text). */
+    public void lyricCompose(CharSequence text) {
+        Chord c = lyricChord();
+        if (!lyricEdit || c == null) return;
+        String t = text == null ? "" : text.toString();
+        if (t.indexOf(' ') >= 0 || t.indexOf('\n') >= 0) {
+            lyricType(t);
+            return;
+        }
+        lyricBeforeChange();
+        lyricDropComposing();
+        c.lyric = (c.lyric == null ? "" : c.lyric) + t;
+        lyricComposing = t.length();
+        changed();
+    }
+
+    /** The input method has finished its composing text; it stays in the lyric. */
+    public void lyricFinishComposing() {
+        lyricComposing = 0;
+    }
+
+    /** Deletes the last character of the syllable. At the start of a syllable, moves back to the previous one. */
+    public void lyricBackspace() {
+        Chord c = lyricChord();
+        if (!lyricEdit || c == null) return;
+        if (lyricComposing > 0) {
+            lyricBeforeChange();
+            lyricDropComposing();
+            changed();
+            return;
+        }
+        String base = c.lyric == null ? "" : c.lyric;
+        if (!base.isEmpty()) {
+            lyricBeforeChange();
+            c.lyric = base.substring(0, base.length() - 1);
+            changed();
+        } else {
+            lyricMove(false);
+        }
+    }
+
+    /** Ends lyric entry, keeping what was typed. */
+    public void endLyric() {
+        if (!lyricEdit) return;
+        lyricDropComposing();
+        lyricFinish(lyricChord());
+        lyricEdit = false;
+        lyricUndoPending = false;
         changed();
     }
 

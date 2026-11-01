@@ -54,6 +54,11 @@ public class ModelTests {
         return Score.create("Test", "Me", parts, 4, 4, 2, 100, 4);
     }
 
+    static String lyricAt(io.github.vlesk.stave.edit.EditorState es, Pos p) {
+        ChordRest cr = ScoreEdit.elementAt(es.score, p);
+        return cr == null ? null : cr.lyric;
+    }
+
     static Chord chord(int... pitches) {
         Chord c = new Chord();
         for (int p : pitches) c.addNote(new Note(p, Pitch.spell(p, 2)));
@@ -320,6 +325,38 @@ public class ModelTests {
             check(samples > 60, "cursor samples: " + samples);
             // halfway through a measure with a single whole note is not stuck at the note
             check(dl.playX(0, sc.measures.get(0).ticks() / 2) > dl.playX(0, 0) + 0.5f, "cursor moves within a whole-note bar");
+        }
+
+        // inline lyric entry: typing, space, composing text, backspace, undo, empty syllables
+        {
+            io.github.vlesk.stave.edit.EditorState es = new io.github.vlesk.stave.edit.EditorState(pianoScore());
+            es.startInput();
+            es.setDuration(Duration.QUARTER);
+            es.enterPitch(60, Integer.MIN_VALUE);
+            es.enterPitch(62, Integer.MIN_VALUE);
+            es.enterPitch(64, Integer.MIN_VALUE);
+            es.stopInput();
+            Pos a = new Pos(0, 0, 0, 0), b = new Pos(0, 0, 0, 480), c3 = new Pos(0, 0, 0, 960);
+            check(es.beginLyric(a), "lyric starts on a chord");
+            es.lyricType("Hel-");
+            es.lyricType(" ");
+            check(es.lyricEdit && es.selPos.tick == 480, "space moves to the next syllable");
+            es.lyricCompose("l");
+            es.lyricCompose("lo");
+            es.lyricFinishComposing();
+            es.endLyric();
+            check(!es.lyricEdit, "endLyric ends entry");
+            check("Hel-".equals(lyricAt(es, a)) && "lo".equals(lyricAt(es, b)) && lyricAt(es, c3) == null,
+                    "syllables typed: " + lyricAt(es, a) + " / " + lyricAt(es, b));
+            es.beginLyric(a);
+            es.lyricBackspace();
+            es.endLyric();
+            check("Hel".equals(lyricAt(es, a)), "backspace removes a character");
+            es.undo();
+            check("Hel-".equals(lyricAt(es, a)), "undo restores the syllable");
+            es.beginLyric(c3);
+            es.endLyric();
+            check(lyricAt(es, c3) == null, "an empty syllable is not kept");
         }
 
         // MuseScore's own test files

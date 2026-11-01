@@ -3,12 +3,19 @@ package io.github.vlesk.stave.ui;
 import android.content.Context;
 import android.graphics.Canvas;
 import android.graphics.Paint;
+import android.graphics.Rect;
 import android.graphics.RectF;
 import android.graphics.Typeface;
+import android.text.InputType;
 import android.view.GestureDetector;
 import android.view.MotionEvent;
 import android.view.ScaleGestureDetector;
 import android.view.View;
+import android.view.ViewTreeObserver;
+import android.view.inputmethod.BaseInputConnection;
+import android.view.inputmethod.EditorInfo;
+import android.view.inputmethod.InputConnection;
+import android.view.inputmethod.InputMethodManager;
 import android.widget.OverScroller;
 
 import io.github.vlesk.stave.edit.EditorState;
@@ -42,6 +49,9 @@ public final class ScoreView extends View {
         void onStaffNote(Pos pos, int line);
 
         void onLongPress();
+
+        /** Inline lyric entry changed the lyric text (not a selection change, so no note preview). */
+        void onLyricChanged();
     }
 
     private final Theme theme;
@@ -69,6 +79,7 @@ public final class ScoreView extends View {
     // playback
     private final Set<Object> playing = new HashSet<Object>();
     private int playMeasure = -1, playTick;
+    private ViewTreeObserver.OnGlobalLayoutListener lyricLayoutListener;
 
     private final Paint cursorPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint cursorStroke = new Paint(Paint.ANTI_ALIAS_FLAG);
@@ -271,6 +282,194 @@ public final class ScoreView extends View {
         }
     }
 
+    // ------------------------------------------------------------------ inline lyric entry
+
+    private DisplayList.Hit findLyricHit(float sx, float sy) {
+        if (dl == null) return null;
+        float tol = Math.max(0.6f, theme.dp(10) / sp());
+        for (DisplayList.Hit h : dl.lyricHits) {
+            float x1 = Math.max(h.x1, h.x0 + 1.2f);
+            if (sx >= h.x0 - tol && sx <= x1 + tol && sy >= h.y0 - tol && sy <= h.y1 + tol) return h;
+        }
+        return null;
+    }
+
+    /** The lyric position of a chord in the current layout, or null if it has no lyric row. */
+    private DisplayList.Hit lyricHitFor(ChordRest cr) {
+        if (dl == null || cr == null) return null;
+        for (DisplayList.Hit h : dl.lyricHits) if (h.cr == cr) return h;
+        return null;
+    }
+
+    private void drawLyricCaret(Canvas c, float sp) {
+        if (state == null || !state.lyricEdit) return;
+        DisplayList.Hit h = lyricHitFor(state.selectedChordRest());
+        if (h == null) return;
+        Paint p = new Paint(Paint.ANTI_ALIAS_FLAG);
+        p.setColor(theme.voice[state.voice & 3]);
+        float x = h.x1 * sp + theme.dp(1);
+        c.drawRect(x, h.y0 * sp, x + theme.dp(2), h.y1 * sp, p);
+    }
+
+    private InputMethodManager inputMethods() {
+        return (InputMethodManager) getContext().getSystemService(Context.INPUT_METHOD_SERVICE);
+    }
+
+    /** Shows the on-screen keyboard for typing a lyric, and keeps the lyric above it. */
+    public void startLyricInput() {
+        requestFocus();
+        InputMethodManager imm = inputMethods();
+        if (imm != null) {
+            imm.restartInput(this);
+            imm.showSoftInput(this, InputMethodManager.SHOW_IMPLICIT);
+        }
+        if (lyricLayoutListener == null) {
+            lyricLayoutListener = new ViewTreeObserver.OnGlobalLayoutListener() {
+                @Override
+                public void onGlobalLayout() {
+                    ensureLyricVisible();
+                }
+            };
+            getViewTreeObserver().addOnGlobalLayoutListener(lyricLayoutListener);
+        }
+        ensureLyricVisible();
+    }
+
+    public void stopLyricInput() {
+        if (lyricLayoutListener != null) {
+            getViewTreeObserver().removeOnGlobalLayoutListener(lyricLayoutListener);
+            lyricLayoutListener = null;
+        }
+        InputMethodManager imm = inputMethods();
+        if (imm != null) imm.hideSoftInputFromWindow(getWindowToken(), 0);
+    }
+
+    /** Scrolls so the lyric being typed is above the on-screen keyboard. */
+    public void ensureLyricVisible() {
+        if (dl == null || state == null || !state.lyricEdit) return;
+        DisplayList.Hit h = lyricHitFor(state.selectedChordRest());
+        if (h == null) return;
+        int[] loc = new int[2];
+        getLocationOnScreen(loc);
+        Rect frame = new Rect();
+        getWindowVisibleDisplayFrame(frame); // excludes the keyboard
+        float sp = sp();
+        float visibleBottom = Math.min(getHeight(), frame.bottom - loc[1]);
+        float margin = theme.dp(64);
+        float top = h.y0 * sp - scrollYPx;
+        float bottom = h.y1 * sp - scrollYPx;
+        float target = scrollYPx;
+        if (bottom > visibleBottom - margin) target = scrollYPx + (bottom - (visibleBottom - margin));
+        else if (top < margin) target = scrollYPx - (margin - top);
+        if (target != scrollYPx) {
+            scroller.forceFinished(true);
+            scroller.startScroll(0, (int) scrollYPx, 0, (int) (target - scrollYPx), 200);
+            postInvalidateOnAnimation();
+        }
+    }
+
+    /** After a change to the lyric text: keep it visible, redraw, and tell the editor. */
+    private void lyricChanged() {
+        ensureLyricVisible();
+        invalidate();
+        if (listener != null) listener.onLyricChanged();
+    }
+
+    @Override
+    public boolean onCheckIsTextEditor() {
+        return state != null && state.lyricEdit;
+    }
+
+    @Override
+    public InputConnection onCreateInputConnection(EditorInfo outAttrs) {
+        if (state == null || !state.lyricEdit) return null;
+        outAttrs.inputType = InputType.TYPE_CLASS_TEXT;
+        outAttrs.imeOptions = EditorInfo.IME_ACTION_NEXT | EditorInfo.IME_FLAG_NO_EXTRACT_UI;
+        return new LyricInputConnection();
+    }
+
+    /** Connects the on-screen keyboard (and its suggestions and composing text) to the lyric. */
+    private final class LyricInputConnection extends BaseInputConnection {
+        LyricInputConnection() {
+            super(ScoreView.this, false);
+        }
+
+        @Override
+        public boolean commitText(CharSequence text, int newCursorPosition) {
+            if (state == null) return false;
+            state.lyricType(text);
+            lyricChanged();
+            return true;
+        }
+
+        @Override
+        public boolean setComposingText(CharSequence text, int newCursorPosition) {
+            if (state == null) return false;
+            state.lyricCompose(text);
+            lyricChanged();
+            return true;
+        }
+
+        @Override
+        public boolean finishComposingText() {
+            if (state != null) state.lyricFinishComposing();
+            return true;
+        }
+
+        @Override
+        public boolean deleteSurroundingText(int beforeLength, int afterLength) {
+            if (state == null) return false;
+            for (int i = 0; i < beforeLength; i++) state.lyricBackspace();
+            lyricChanged();
+            return true;
+        }
+
+        @Override
+        public boolean performEditorAction(int actionCode) {
+            if (state == null) return false;
+            state.lyricNext();
+            lyricChanged();
+            return true;
+        }
+
+        @Override
+        public CharSequence getTextBeforeCursor(int n, int flags) {
+            ChordRest cr = state == null ? null : state.selectedChordRest();
+            String t = cr instanceof Chord && cr.lyric != null ? cr.lyric : "";
+            return t.substring(Math.max(0, t.length() - n));
+        }
+
+        @Override
+        public CharSequence getTextAfterCursor(int n, int flags) {
+            return "";
+        }
+
+        @Override
+        public CharSequence getSelectedText(int flags) {
+            return null;
+        }
+
+        @Override
+        public boolean setSelection(int start, int end) {
+            return true;
+        }
+
+        @Override
+        public boolean beginBatchEdit() {
+            return true;
+        }
+
+        @Override
+        public boolean endBatchEdit() {
+            return true;
+        }
+
+        @Override
+        public boolean clearMetaKeyStates(int states) {
+            return true;
+        }
+    }
+
     // ------------------------------------------------------------------ playback
 
     public void setPlayPosition(int measure, int tick) {
@@ -441,6 +640,17 @@ public final class ScoreView extends View {
 
     private void handleTap(float x, float y) {
         if (dl == null || state == null) return;
+        DisplayList.Hit lyric = findLyricHit(toScoreX(x), toScoreY(y));
+        if (lyric != null) {
+            // tapping a lyric opens it for editing, at its end
+            if (!state.beginLyric(lyric.pos)) return;
+            Ui.haptic(this);
+            invalidate();
+            if (listener != null) listener.onSelectionChanged();
+            ensureLyricVisible();
+            return;
+        }
+        if (state.lyricEdit) state.endLyric();
         DisplayList.Hit h = findHit(toScoreX(x), toScoreY(y));
         if (h == null) {
             state.clearSelection();
@@ -505,6 +715,7 @@ public final class ScoreView extends View {
         }
         renderer.draw(c, dl, sp, y0, y1, ScoreRenderer.setHighlighter(sel, selNote, theme.voice, playing, theme.playback));
         drawPlayLine(c, sp);
+        drawLyricCaret(c, sp);
         drawGhost(c, sp);
         c.restore();
     }

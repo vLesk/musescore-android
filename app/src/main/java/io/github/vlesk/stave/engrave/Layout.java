@@ -1372,9 +1372,18 @@ public final class Layout {
                     }
                     if (cr.lyric != null && cr instanceof Chord) {
                         float w = tm.width(cr.lyric, TextMetrics.FONT_TEXT, 1.9f);
-                        DisplayList.Item it = text(g.items, cr.lyric, TextMetrics.FONT_TEXT, 1.9f, x + HEAD_W / 2 - Math.min(w / 2, 1.2f) + 0.0f, lyrY, DisplayList.ALIGN_LEFT);
+                        float lx = x + HEAD_W / 2 - Math.min(w / 2, 1.2f) + 0.0f;
+                        DisplayList.Item it = text(g.items, cr.lyric, TextMetrics.FONT_TEXT, 1.9f, lx, lyrY, DisplayList.ALIGN_LEFT);
                         it.owner = cr;
                         g.ext(lyrY - 1.6f, lyrY + 0.6f);
+                        DisplayList.Hit lh = new DisplayList.Hit();
+                        lh.x0 = lx;
+                        lh.x1 = lx + w;
+                        lh.y0 = lyrY - 1.6f;
+                        lh.y1 = lyrY + 0.6f;
+                        lh.pos = new Pos(m, st, v, starts[i]);
+                        lh.cr = cr;
+                        dl.lyricHits.add(lh);
                     }
                     if (cr.chordSymbol != null) {
                         DisplayList.Item it = text(g.items, ChordSymbols.display(cr.chordSymbol), TextMetrics.FONT_TEXT, 2.2f, x, chordY, DisplayList.ALIGN_LEFT);

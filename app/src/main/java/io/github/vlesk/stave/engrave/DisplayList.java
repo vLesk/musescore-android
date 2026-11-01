@@ -95,6 +95,8 @@ public final class DisplayList {
 
     public final List<Item> items = new ArrayList<Item>();
     public final List<Hit> hits = new ArrayList<Hit>();
+    /** Where each chord's lyric is drawn (for tapping to edit and for the lyric caret). */
+    public final List<Hit> lyricHits = new ArrayList<Hit>();
     public final List<SystemInfo> systems = new ArrayList<SystemInfo>();
     public final List<MeasureInfo> measures = new ArrayList<MeasureInfo>();
     public float width, height;
