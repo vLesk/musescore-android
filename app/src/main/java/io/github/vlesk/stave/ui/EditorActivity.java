@@ -397,7 +397,7 @@ public final class EditorActivity extends Activity implements ScoreView.Listener
     /**
      * The bar shown while typing lyrics. It is docked directly above the keyboard, where the thumbs
      * are, and is tinted so it reads as its own mode. It holds previous/next note, a hyphen key
-     * (phone keyboards bury it) and an Exit button that says what it leaves: lyric entry, not editing.
+     * (phone keyboards bury it) and a standard Done button that leaves lyric entry.
      */
     private void buildLyricBar() {
         lyricBar = Ui.row(this);
@@ -442,12 +442,12 @@ public final class EditorActivity extends Activity implements ScoreView.Listener
         next.setImageTintList(android.content.res.ColorStateList.valueOf(t.onPrimaryContainer));
         lyricBar.addView(next);
         lyricBar.addView(new View(this), Ui.lin(0, 1, 1f));
-        TextView exit = Ui.text(this, "Exit lyrics", 15, t.onPrimary, true);
+        TextView exit = Ui.text(this, getString(R.string.done), 15, t.onPrimary, true);
         exit.setGravity(Gravity.CENTER);
         exit.setPadding(t.dp(18), 0, t.dp(18), 0);
         exit.setBackground(Ui.rippleRound(t, t.primary, 20));
         exit.setClickable(true);
-        exit.setContentDescription("Exit lyric entry and go back to editing");
+        exit.setContentDescription(getString(R.string.done) + ", leave lyric entry");
         exit.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
