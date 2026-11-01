@@ -3,7 +3,6 @@ package io.github.vlesk.stave.ui;
 import android.content.Context;
 import android.graphics.Canvas;
 import android.graphics.Paint;
-import android.graphics.Rect;
 import android.graphics.RectF;
 import android.graphics.Typeface;
 import android.text.InputType;
@@ -11,7 +10,6 @@ import android.view.GestureDetector;
 import android.view.MotionEvent;
 import android.view.ScaleGestureDetector;
 import android.view.View;
-import android.view.ViewTreeObserver;
 import android.view.inputmethod.BaseInputConnection;
 import android.view.inputmethod.EditorInfo;
 import android.view.inputmethod.InputConnection;
@@ -79,7 +77,9 @@ public final class ScoreView extends View {
     // playback
     private final Set<Object> playing = new HashSet<Object>();
     private int playMeasure = -1, playTick;
-    private ViewTreeObserver.OnGlobalLayoutListener lyricLayoutListener;
+    private boolean lyricWasActive;
+    /** Height in px at the bottom covered by the lyric bar and the keyboard (0 outside lyric entry). */
+    private int lyricObstruction;
 
     private final Paint cursorPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint cursorStroke = new Paint(Paint.ANTI_ALIAS_FLAG);
@@ -213,8 +213,29 @@ public final class ScoreView extends View {
 
     /** Call after every edit. */
     public void refresh() {
+        // While typing lyrics, systems grow and shrink (a lyric row appears) and text reflows. Keep the
+        // note being edited at the same place on screen so the score doesn't jump under the finger.
+        float anchor = Float.NaN;
+        boolean lyric = state != null && (state.lyricEdit || lyricWasActive) && state.selPos != null;
+        if (lyric) anchor = staffScreenY(state.selPos);
         relayout(false);
+        if (lyric && !Float.isNaN(anchor)) {
+            float now = staffScreenY(state.selPos);
+            if (!Float.isNaN(now) && now != anchor) {
+                scroller.forceFinished(true);
+                scrollYPx += now - anchor;
+                clampScroll();
+            }
+        }
+        lyricWasActive = state != null && state.lyricEdit;
         invalidate();
+    }
+
+    /** Screen y of the top line of the staff at a position in the current layout, or NaN. */
+    private float staffScreenY(Pos p) {
+        if (dl == null || p == null || p.measure < 0 || p.measure >= dl.measures.size() || dl.measures.get(p.measure) == null) return Float.NaN;
+        DisplayList.SystemInfo si = dl.systems.get(dl.measures.get(p.measure).system);
+        return si.staffY[Math.max(0, Math.min(p.staff, si.staffY.length - 1))] * sp() - scrollYPx;
     }
 
     @Override
@@ -225,7 +246,7 @@ public final class ScoreView extends View {
 
     private int maxScroll() {
         if (dl == null) return 0;
-        return (int) Math.max(0, dl.height * sp() - getHeight() + theme.dp(24));
+        return (int) Math.max(0, dl.height * sp() - getHeight() + theme.dp(24) + lyricObstruction);
     }
 
     private void clampScroll() {
@@ -316,8 +337,8 @@ public final class ScoreView extends View {
     }
 
     /**
-     * Starts lyric input. With showKeyboard, opens the on-screen keyboard and keeps the lyric
-     * above it; without it (a physical keyboard is attached), only takes the focus.
+     * Starts lyric input. With showKeyboard, opens the on-screen keyboard; without it (a physical
+     * keyboard is attached), only takes the focus.
      */
     public void startLyricInput(final boolean showKeyboard) {
         // in touch mode a view only takes the focus (and so the keyboard) if it asks for it
@@ -334,45 +355,40 @@ public final class ScoreView extends View {
                 }
             });
         }
-        if (showKeyboard && lyricLayoutListener == null) {
-            lyricLayoutListener = new ViewTreeObserver.OnGlobalLayoutListener() {
-                @Override
-                public void onGlobalLayout() {
-                    ensureLyricVisible();
-                }
-            };
-            getViewTreeObserver().addOnGlobalLayoutListener(lyricLayoutListener);
-        }
         ensureLyricVisible();
     }
 
     public void stopLyricInput() {
-        if (lyricLayoutListener != null) {
-            getViewTreeObserver().removeOnGlobalLayoutListener(lyricLayoutListener);
-            lyricLayoutListener = null;
-        }
         InputMethodManager imm = inputMethods();
         if (imm != null) imm.hideSoftInputFromWindow(getWindowToken(), 0);
     }
 
-    /** Scrolls so the lyric being typed is above the on-screen keyboard. */
+    /** Tells the view how much of its bottom is covered by the lyric bar and the keyboard. */
+    public void setLyricObstruction(int px) {
+        if (px == lyricObstruction) return;
+        lyricObstruction = px;
+        clampScroll();
+        ensureLyricVisible();
+    }
+
+    /**
+     * Scrolls only as far as needed to bring the lyric being typed into the part of the view that
+     * is not covered by the keyboard or the lyric bar. A lyric that is already visible stays put.
+     */
     public void ensureLyricVisible() {
         if (dl == null || state == null || !state.lyricEdit) return;
         DisplayList.Hit h = lyricHitFor(state.selectedChordRest());
         if (h == null) return;
-        int[] loc = new int[2];
-        getLocationOnScreen(loc);
-        Rect frame = new Rect();
-        getWindowVisibleDisplayFrame(frame); // excludes the keyboard
         float sp = sp();
-        float visibleBottom = Math.min(getHeight(), frame.bottom - loc[1]);
-        float margin = theme.dp(64);
+        float visibleBottom = getHeight() - lyricObstruction;
+        float pad = theme.dp(12);
         float top = h.y0 * sp - scrollYPx;
         float bottom = h.y1 * sp - scrollYPx;
         float target = scrollYPx;
-        if (bottom > visibleBottom - margin) target = scrollYPx + (bottom - (visibleBottom - margin));
-        else if (top < margin) target = scrollYPx - (margin - top);
-        if (target != scrollYPx) {
+        if (bottom > visibleBottom - pad) target = scrollYPx + (bottom - (visibleBottom - pad));
+        else if (top < pad) target = scrollYPx - (pad - top);
+        target = Math.max(0, Math.min(maxScroll(), target));
+        if (Math.abs(target - scrollYPx) > 0.5f) {
             scroller.forceFinished(true);
             scroller.startScroll(0, (int) scrollYPx, 0, (int) (target - scrollYPx), 200);
             postInvalidateOnAnimation();
@@ -381,7 +397,6 @@ public final class ScoreView extends View {
 
     /** After a change to the lyric text: keep it visible, redraw, and tell the editor. */
     private void lyricChanged() {
-        ensureLyricVisible();
         invalidate();
         if (listener != null) listener.onLyricChanged();
     }

@@ -632,38 +632,44 @@ public final class EditorState {
         return true;
     }
 
-    /** Ends the current syllable and moves to the next chord. Ends lyric entry after the last chord. */
+    /** Ends the current syllable and moves to the next chord. At the last chord nothing happens. */
     public boolean lyricNext() {
         return lyricMove(true);
     }
 
-    private boolean lyricMove(boolean forward) {
-        if (!lyricEdit) return false;
-        lyricDropComposing();
-        lyricFinish(lyricChord());
-        Pos p = selPos;
-        while (p != null) {
-            p = forward ? ScoreEdit.next(score, p) : ScoreEdit.prev(score, p);
-            if (p == null) break;
-            ChordRest cr = ScoreEdit.elementAt(score, p);
-            if (cr instanceof Chord) {
-                selKind = SEL_CHORDREST;
-                selPos = p;
-                selNote = -1;
-                if (cr.lyric == null) cr.lyric = "";
-                lyricUndoPending = true;
-                changed();
-                return true;
-            }
-        }
-        // no further chord: stop typing and keep the last syllable selected
-        lyricEdit = false;
-        lyricUndoPending = false;
-        changed();
-        return false;
+    /** Ends the current syllable and moves back to the previous chord. */
+    public boolean lyricPrevious() {
+        return lyricMove(false);
     }
 
-    /** Types text into the lyric. A space or newline ends the syllable, as in MuseScore. */
+    /**
+     * Moves lyric entry to the next or previous chord. At the first or last chord nothing changes:
+     * lyric entry is only left on purpose (see {@link #endLyric()}), never by running out of notes.
+     */
+    private boolean lyricMove(boolean forward) {
+        if (!lyricEdit) return false;
+        Pos p = selPos;
+        ChordRest target = null;
+        while (p != null && target == null) {
+            p = forward ? ScoreEdit.next(score, p) : ScoreEdit.prev(score, p);
+            if (p != null && ScoreEdit.elementAt(score, p) instanceof Chord) target = ScoreEdit.elementAt(score, p);
+        }
+        if (target == null) return false;
+        lyricFinish(lyricChord());
+        selKind = SEL_CHORDREST;
+        selPos = p;
+        selNote = -1;
+        if (target.lyric == null) target.lyric = "";
+        lyricUndoPending = true;
+        changed();
+        return true;
+    }
+
+    /**
+     * Types text into the lyric, as in MuseScore: a space or newline ends the syllable and moves to
+     * the next note; a hyphen after a syllable is added to it and also moves to the next note (so
+     * "hel-lo" fills two notes). A hyphen at the start of a syllable is an ordinary character.
+     */
     public void lyricType(CharSequence text) {
         if (!lyricEdit || text == null) return;
         lyricDropComposing();
@@ -671,15 +677,26 @@ public final class EditorState {
             char ch = text.charAt(i);
             if (ch == ' ' || ch == '\n') {
                 lyricMove(true);
-                if (!lyricEdit) return;
             } else if (!Character.isISOControl(ch)) {
                 Chord c = lyricChord();
                 if (c == null) return;
                 lyricBeforeChange();
-                c.lyric = (c.lyric == null ? "" : c.lyric) + ch;
+                String base = c.lyric == null ? "" : c.lyric;
+                c.lyric = base + ch;
                 changed();
+                if (ch == '-' && !base.isEmpty()) lyricMove(true);
             }
         }
+    }
+
+    /** Types a character as plain text (a literal hyphen, say), without moving to the next note. */
+    public void lyricInsertLiteral(char ch) {
+        Chord c = lyricChord();
+        if (!lyricEdit || c == null) return;
+        lyricDropComposing();
+        lyricBeforeChange();
+        c.lyric = (c.lyric == null ? "" : c.lyric) + ch;
+        changed();
     }
 
     /** Shows the text an input method is composing (replaces the previous composing text). */
@@ -687,7 +704,7 @@ public final class EditorState {
         Chord c = lyricChord();
         if (!lyricEdit || c == null) return;
         String t = text == null ? "" : text.toString();
-        if (t.indexOf(' ') >= 0 || t.indexOf('\n') >= 0) {
+        if (t.indexOf(' ') >= 0 || t.indexOf('\n') >= 0 || t.indexOf('-') >= 0) {
             lyricType(t);
             return;
         }

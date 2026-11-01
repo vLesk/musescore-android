@@ -88,8 +88,8 @@ public final class EditorActivity extends Activity implements ScoreView.Listener
     private PianoView piano;
     private View pianoBox;
     private TextView titleView, statusView;
-    private ImageButton undoBtn, redoBtn, playBtn, chordBtn, kbdBtn, moreBtn;
-    private LinearLayout lyricDoneBtn;
+    private ImageButton undoBtn, redoBtn, playBtn, chordBtn, kbdBtn;
+    private LinearLayout lyricBar;
     private LinearLayout fab;
     private android.widget.ImageView fabIcon;
     private TextView fabLabel;
@@ -229,6 +229,7 @@ public final class EditorActivity extends Activity implements ScoreView.Listener
         boolean input = st != null && st.inputMode;
         if (paletteOpen()) closePalette();
         lyricInputOn = false;
+        lyricBarListener = null;
         buildUi();
         if (st != null) {
             view.bind(st, this);
@@ -307,32 +308,10 @@ public final class EditorActivity extends Activity implements ScoreView.Listener
                 showMenu(more);
             }
         });
-        moreBtn = more;
-        lyricDoneBtn = Ui.row(this);
-        lyricDoneBtn.setBackground(Ui.rippleRound(t, t.primaryContainer, 20));
-        lyricDoneBtn.setPadding(t.dp(14), 0, t.dp(18), 0);
-        lyricDoneBtn.setClickable(true);
-        lyricDoneBtn.setContentDescription(getString(R.string.done));
-        android.widget.ImageView doneIcon = new android.widget.ImageView(this);
-        doneIcon.setImageResource(R.drawable.ic_check);
-        doneIcon.setImageTintList(android.content.res.ColorStateList.valueOf(t.onPrimaryContainer));
-        lyricDoneBtn.addView(doneIcon, Ui.lin(t.dp(20), t.dp(20)));
-        TextView doneLabel = Ui.text(this, getString(R.string.done), 15, t.onPrimaryContainer, true);
-        doneLabel.setPadding(t.dp(8), 0, 0, 0);
-        lyricDoneBtn.addView(doneLabel);
-        lyricDoneBtn.setOnClickListener(new View.OnClickListener() {
-            @Override
-            public void onClick(View v) {
-                st.endLyric();
-                refresh();
-            }
-        });
-        lyricDoneBtn.setVisibility(View.GONE);
         top.addView(undoBtn);
         top.addView(redoBtn);
         top.addView(playBtn);
         top.addView(more);
-        top.addView(lyricDoneBtn, Ui.lin(-2, t.dp(40)));
         col.addView(top, Ui.lin(-1, -2));
 
         // score area: score canvas + floating contextual toolbar + extended FAB + snackbars
@@ -396,6 +375,8 @@ public final class EditorActivity extends Activity implements ScoreView.Listener
         inputDock.setVisibility(View.GONE);
         col.addView(inputDock, Ui.lin(-1, -2));
 
+        buildLyricBar();
+
         // palette sheet host (overlay)
         sheetHost = new FrameLayout(this);
         sheetHost.setVisibility(View.GONE);
@@ -409,6 +390,102 @@ public final class EditorActivity extends Activity implements ScoreView.Listener
     }
 
     private int navInset;
+
+    private static final int LYRIC_BAR_DP = 56;
+    private android.view.ViewTreeObserver.OnGlobalLayoutListener lyricBarListener;
+
+    /**
+     * The bar shown while typing lyrics. It is docked directly above the keyboard, where the thumbs
+     * are, and is tinted so it reads as its own mode. It holds previous/next note, a hyphen key
+     * (phone keyboards bury it) and an Exit button that says what it leaves: lyric entry, not editing.
+     */
+    private void buildLyricBar() {
+        lyricBar = Ui.row(this);
+        lyricBar.setBackgroundColor(t.primaryContainer);
+        lyricBar.setElevation(t.dp(8));
+        lyricBar.setPadding(t.dp(8), 0, t.dp(8), 0);
+        android.widget.ImageView mode = new android.widget.ImageView(this);
+        mode.setImageResource(R.drawable.ic_text_fields);
+        mode.setImageTintList(android.content.res.ColorStateList.valueOf(t.onPrimaryContainer));
+        mode.setContentDescription("Lyric entry");
+        mode.setPadding(t.dp(4), 0, t.dp(8), 0);
+        lyricBar.addView(mode, Ui.lin(t.dp(36), t.dp(24)));
+        ImageButton prev = Ui.icon(this, t, R.drawable.ic_chevron_left, "Previous note", new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                st.lyricPrevious();
+                refresh();
+            }
+        });
+        prev.setImageTintList(android.content.res.ColorStateList.valueOf(t.onPrimaryContainer));
+        lyricBar.addView(prev);
+        TextView hyphen = Ui.text(this, "-", 26, t.onPrimaryContainer, true);
+        hyphen.setGravity(Gravity.CENTER);
+        hyphen.setBackground(Ui.rippleRound(t, android.graphics.Color.TRANSPARENT, 24));
+        hyphen.setClickable(true);
+        hyphen.setContentDescription("Hyphen, then next note");
+        hyphen.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                st.lyricType("-");
+                refresh();
+            }
+        });
+        lyricBar.addView(hyphen, Ui.lin(t.dp(48), t.dp(48)));
+        ImageButton next = Ui.icon(this, t, R.drawable.ic_chevron_right, "Next note", new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                st.lyricNext();
+                refresh();
+            }
+        });
+        next.setImageTintList(android.content.res.ColorStateList.valueOf(t.onPrimaryContainer));
+        lyricBar.addView(next);
+        lyricBar.addView(new View(this), Ui.lin(0, 1, 1f));
+        TextView exit = Ui.text(this, "Exit lyrics", 15, t.onPrimary, true);
+        exit.setGravity(Gravity.CENTER);
+        exit.setPadding(t.dp(18), 0, t.dp(18), 0);
+        exit.setBackground(Ui.rippleRound(t, t.primary, 20));
+        exit.setClickable(true);
+        exit.setContentDescription("Exit lyric entry and go back to editing");
+        exit.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                st.endLyric();
+                refresh();
+            }
+        });
+        lyricBar.addView(exit, Ui.lin(-2, t.dp(40)));
+        lyricBar.setVisibility(View.GONE);
+        root.addView(lyricBar, Ui.frame(-1, t.dp(LYRIC_BAR_DP), Gravity.BOTTOM));
+    }
+
+    /**
+     * Docks the lyric bar right above the on-screen keyboard (or the bottom edge when there is none)
+     * and tells the score how much of its bottom is covered, so it can keep the lyric in view.
+     */
+    private void updateLyricBar() {
+        if (lyricBar == null || view == null) return;
+        boolean on = st != null && st.lyricEdit;
+        lyricBar.setVisibility(on ? View.VISIBLE : View.GONE);
+        if (!on) {
+            view.setLyricObstruction(0);
+            return;
+        }
+        android.graphics.Rect frame = new android.graphics.Rect();
+        root.getWindowVisibleDisplayFrame(frame); // excludes the keyboard
+        int[] loc = new int[2];
+        root.getLocationOnScreen(loc);
+        int keyboard = Math.max(0, loc[1] + root.getHeight() - frame.bottom);
+        int margin = Math.max(navInset, keyboard);
+        View col = root.getChildAt(0);
+        FrameLayout.LayoutParams lp = (FrameLayout.LayoutParams) lyricBar.getLayoutParams();
+        if (lp.bottomMargin != margin || lp.leftMargin != col.getPaddingLeft() || lp.rightMargin != col.getPaddingRight()) {
+            lp.setMargins(col.getPaddingLeft(), 0, col.getPaddingRight(), margin);
+            lyricBar.setLayoutParams(lp);
+        }
+        view.setLyricObstruction(t.dp(LYRIC_BAR_DP) + margin);
+    }
 
     @SuppressWarnings("deprecation")
     private View.OnApplyWindowInsetsListener insetsListener(final View top, final View col) {
@@ -952,11 +1029,8 @@ public final class EditorActivity extends Activity implements ScoreView.Listener
         boolean dockOn = st.inputMode && !st.lyricEdit;
         inputDock.setVisibility(dockOn ? View.VISIBLE : View.GONE);
         pianoBox.setVisibility(pianoVisible ? View.VISIBLE : View.GONE);
-        // lyric entry mode: the lower menus close, the top bar offers Done instead of play and overflow
+        // lyric entry mode: the lower menus close; the lyric bar above the keyboard takes over
         fab.setVisibility(st.lyricEdit ? View.GONE : View.VISIBLE);
-        lyricDoneBtn.setVisibility(st.lyricEdit ? View.VISIBLE : View.GONE);
-        playBtn.setVisibility(st.lyricEdit ? View.GONE : View.VISIBLE);
-        moreBtn.setVisibility(st.lyricEdit ? View.GONE : View.VISIBLE);
         if (dockWas != dockOn) {
             if (dockOn) {
                 inputDock.setTranslationY(t.dp(80));
@@ -975,6 +1049,8 @@ public final class EditorActivity extends Activity implements ScoreView.Listener
         }
         updateFloatingToolbar();
         applyBottomInset();
+        updateLyricBar();
+        if (st.lyricEdit) view.ensureLyricVisible();
         Note n = st.selectedNote();
         piano.setHighlight(n != null ? n.pitch : -1);
         if (st.revision != savedRevision) {
@@ -985,7 +1061,7 @@ public final class EditorActivity extends Activity implements ScoreView.Listener
     }
 
     private String statusText() {
-        if (st.lyricEdit) return "Lyric entry \u00b7 Space: next note \u00b7 tap a note to jump \u00b7 Done to finish";
+        if (st.lyricEdit) return "Lyric entry \u00b7 Space or - : next note \u00b7 tap a note to jump";
         StringBuilder sb = new StringBuilder();
         if (st.inputMode && st.cursor != null) {
             sb.append(getString(R.string.note_input)).append(" · ");
@@ -1725,6 +1801,10 @@ public final class EditorActivity extends Activity implements ScoreView.Listener
 
     /** Keys while typing a lyric. Returns false for shortcuts (Ctrl/Alt/Meta), which keep their meaning. */
     private boolean lyricKey(int keyCode, KeyEvent e) {
+        if (keyCode == KeyEvent.KEYCODE_MINUS && e.isCtrlPressed()) {
+            st.lyricInsertLiteral('-'); // MuseScore: Ctrl+- is a hyphen inside the syllable, with no jump
+            return true;
+        }
         if (e.isCtrlPressed() || e.isAltPressed() || e.isMetaPressed()) return false;
         switch (keyCode) {
             case KeyEvent.KEYCODE_ESCAPE:
@@ -1761,9 +1841,19 @@ public final class EditorActivity extends Activity implements ScoreView.Listener
         boolean on = st.lyricEdit;
         if (on && !lyricInputOn) {
             lyricInputOn = true;
+            // the bar follows the keyboard as it opens, closes or changes height
+            lyricBarListener = new android.view.ViewTreeObserver.OnGlobalLayoutListener() {
+                @Override
+                public void onGlobalLayout() {
+                    updateLyricBar();
+                }
+            };
+            root.getViewTreeObserver().addOnGlobalLayoutListener(lyricBarListener);
             view.startLyricInput(!hasPhysicalKeyboard());
         } else if (!on && lyricInputOn) {
             lyricInputOn = false;
+            if (lyricBarListener != null) root.getViewTreeObserver().removeOnGlobalLayoutListener(lyricBarListener);
+            lyricBarListener = null;
             view.stopLyricInput();
         }
     }
