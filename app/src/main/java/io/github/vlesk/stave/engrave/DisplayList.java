@@ -85,6 +85,8 @@ public final class DisplayList {
     public static final class MeasureInfo {
         public int system;
         public float x, width;
+        /** Length of the measure in ticks. */
+        public int ticks;
         /** First content x (after any clef/key/time signature at the measure start). */
         public float contentX;
         public int[] colTicks;
@@ -102,6 +104,44 @@ public final class DisplayList {
         it.kind = kind;
         items.add(it);
         return it;
+    }
+
+    /**
+     * X position of the playback cursor at a tick of a measure. Unlike {@link #xAt}, it runs
+     * across the whole measure: from the first column to the first column of the next measure
+     * on the same system (or the barline, at the end of a system), so the cursor moves on
+     * continuously instead of stalling after the last note column and jumping to the next bar.
+     */
+    public float playX(int measure, int tick) {
+        MeasureInfo mi = measures.get(measure);
+        if (mi.ticks <= 0) return xAt(measure, tick);
+        float endX = mi.x + mi.width;
+        if (measure + 1 < measures.size()) {
+            MeasureInfo next = measures.get(measure + 1);
+            if (next != null && next.system == mi.system) endX = xAt(measure + 1, 0);
+        }
+        // knots: (tick, x) pairs, strictly increasing in tick
+        float[] kt = new float[mi.colTicks.length + 2];
+        float[] kx = new float[kt.length];
+        int n = 0;
+        kt[n] = 0;
+        kx[n++] = xAt(measure, 0);
+        for (int i = 0; i < mi.colTicks.length; i++) {
+            if (mi.colTicks[i] <= kt[n - 1] || mi.colTicks[i] >= mi.ticks) continue;
+            kt[n] = mi.colTicks[i];
+            kx[n++] = mi.colX[i];
+        }
+        kt[n] = mi.ticks;
+        kx[n++] = endX;
+        if (tick <= 0) return kx[0];
+        if (tick >= mi.ticks) return kx[n - 1];
+        for (int i = 1; i < n; i++) {
+            if (tick <= kt[i]) {
+                float f = (tick - kt[i - 1]) / (kt[i] - kt[i - 1]);
+                return kx[i - 1] + f * (kx[i] - kx[i - 1]);
+            }
+        }
+        return kx[n - 1];
     }
 
     /** X position of a tick in a measure (interpolating between columns). */

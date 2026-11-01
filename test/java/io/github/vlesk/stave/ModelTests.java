@@ -286,6 +286,42 @@ public class ModelTests {
             check(!off.intersects(v0, v1, 12), "far-off line culled");
         }
 
+        // playback cursor: moves steadily through each measure and on into the next one
+        {
+            List<Part> ps = new ArrayList<Part>();
+            ps.add(Instruments.byId("piano").create());
+            ps.add(Instruments.byId("soprano").create());
+            Score sc = Score.create("Cursor", "", ps, 4, 4, 3, 100, 4);
+            ScoreEdit.enter(sc, new Pos(0, 0, 0, 0), chord(60), Duration.WHOLE, 0, false);
+            Layout.Options lo = new Layout.Options();
+            lo.width = 40;
+            DisplayList dl = Layout.layout(sc, new TextMetrics() {
+                public float width(String t, int font, float sizeSp) {
+                    return t.length() * sizeSp * 0.5f;
+                }
+            }, lo);
+            float prev = -Float.MAX_VALUE;
+            int samples = 0;
+            for (int m = 0; m < sc.measures.size(); m++) {
+                int len = sc.measures.get(m).ticks();
+                // a new system starts at the left margin, so only compare within one system
+                boolean sameSystem = m == 0 || dl.measures.get(m).system == dl.measures.get(m - 1).system;
+                if (!sameSystem) prev = -Float.MAX_VALUE;
+                for (int t = 0; t <= len; t += len / 16) {
+                    float x = dl.playX(m, t);
+                    check(x >= prev - 1e-4f, "cursor moves forward m" + m + " t" + t + ": " + x + " < " + prev);
+                    prev = x;
+                    samples++;
+                }
+                if (m + 1 < sc.measures.size() && dl.measures.get(m + 1).system == dl.measures.get(m).system) {
+                    check(Math.abs(dl.playX(m, len) - dl.playX(m + 1, 0)) < 1e-4f, "cursor continuous into m" + (m + 1));
+                }
+            }
+            check(samples > 60, "cursor samples: " + samples);
+            // halfway through a measure with a single whole note is not stuck at the note
+            check(dl.playX(0, sc.measures.get(0).ticks() / 2) > dl.playX(0, 0) + 0.5f, "cursor moves within a whole-note bar");
+        }
+
         // MuseScore's own test files
         int ok = 0, total = 0;
         if (args.length > 0) {

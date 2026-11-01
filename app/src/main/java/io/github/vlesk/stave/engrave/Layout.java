@@ -643,6 +643,7 @@ public final class Layout {
                 width = Math.max(width, natural + springSum * Math.max(ratio, 0));
             }
             mi.width = width;
+            mi.ticks = mm.ticks();
             while (dl.measures.size() <= m) dl.measures.add(null);
             dl.measures.set(m, mi);
             mx[m - m0] = x;

@@ -561,7 +561,7 @@ public final class ScoreView extends View {
         if (playMeasure < 0 || playMeasure >= dl.measures.size()) return;
         DisplayList.MeasureInfo mi = dl.measures.get(playMeasure);
         DisplayList.SystemInfo s = dl.systems.get(mi.system);
-        float x = dl.xAt(playMeasure, playTick);
+        float x = dl.playX(playMeasure, playTick);
         Paint p = new Paint();
         p.setColor(Theme.alpha(theme.playback, 0.25f));
         rect.set((x - 0.4f) * sp, (s.staffY[0] - 2f) * sp, (x + 1.6f) * sp, (s.staffY[s.staffY.length - 1] + 6f) * sp);
