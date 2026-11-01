@@ -592,6 +592,29 @@ public final class EditorState {
         lyricComposing = 0;
     }
 
+    /**
+     * Where lyric entry starts: the selected chord, else the first chord of the selected range or
+     * staff, else the first chord of the score. Null if the score has no chord at all.
+     */
+    public Pos lyricStartPos() {
+        ChordRest cr = selectedChordRest();
+        if (cr instanceof Chord) return selPos.copy();
+        int m = 0, staff = 0;
+        if (selKind == SEL_RANGE) {
+            m = rangeM1;
+            staff = rangeS1;
+        } else if (selPos != null) {
+            m = selPos.measure;
+            staff = selPos.staff;
+        }
+        Pos p = new Pos(m, staff, 0, 0);
+        while (p != null) {
+            if (ScoreEdit.elementAt(score, p) instanceof Chord) return p;
+            p = ScoreEdit.next(score, p);
+        }
+        return null;
+    }
+
     /** Starts typing the lyric of the chord at p. An existing lyric is continued at its end. */
     public boolean beginLyric(Pos p) {
         if (p == null) return false;

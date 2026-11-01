@@ -88,7 +88,8 @@ public final class EditorActivity extends Activity implements ScoreView.Listener
     private PianoView piano;
     private View pianoBox;
     private TextView titleView, statusView;
-    private ImageButton undoBtn, redoBtn, playBtn, chordBtn, kbdBtn;
+    private ImageButton undoBtn, redoBtn, playBtn, chordBtn, kbdBtn, moreBtn;
+    private LinearLayout lyricDoneBtn;
     private LinearLayout fab;
     private android.widget.ImageView fabIcon;
     private TextView fabLabel;
@@ -227,6 +228,7 @@ public final class EditorActivity extends Activity implements ScoreView.Listener
         // rebuild the toolbars for the new width (one or two rows) and re-flow the score
         boolean input = st != null && st.inputMode;
         if (paletteOpen()) closePalette();
+        lyricInputOn = false;
         buildUi();
         if (st != null) {
             view.bind(st, this);
@@ -281,14 +283,14 @@ public final class EditorActivity extends Activity implements ScoreView.Listener
         undoBtn = Ui.icon(this, t, R.drawable.ic_undo, getString(R.string.undo), new View.OnClickListener() {
             @Override
             public void onClick(View v) {
-                st.undo();
+                undoRedo(false);
                 refresh();
             }
         });
         redoBtn = Ui.icon(this, t, R.drawable.ic_redo, getString(R.string.redo), new View.OnClickListener() {
             @Override
             public void onClick(View v) {
-                st.redo();
+                undoRedo(true);
                 refresh();
             }
         });
@@ -305,10 +307,32 @@ public final class EditorActivity extends Activity implements ScoreView.Listener
                 showMenu(more);
             }
         });
+        moreBtn = more;
+        lyricDoneBtn = Ui.row(this);
+        lyricDoneBtn.setBackground(Ui.rippleRound(t, t.primaryContainer, 20));
+        lyricDoneBtn.setPadding(t.dp(14), 0, t.dp(18), 0);
+        lyricDoneBtn.setClickable(true);
+        lyricDoneBtn.setContentDescription(getString(R.string.done));
+        android.widget.ImageView doneIcon = new android.widget.ImageView(this);
+        doneIcon.setImageResource(R.drawable.ic_check);
+        doneIcon.setImageTintList(android.content.res.ColorStateList.valueOf(t.onPrimaryContainer));
+        lyricDoneBtn.addView(doneIcon, Ui.lin(t.dp(20), t.dp(20)));
+        TextView doneLabel = Ui.text(this, getString(R.string.done), 15, t.onPrimaryContainer, true);
+        doneLabel.setPadding(t.dp(8), 0, 0, 0);
+        lyricDoneBtn.addView(doneLabel);
+        lyricDoneBtn.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                st.endLyric();
+                refresh();
+            }
+        });
+        lyricDoneBtn.setVisibility(View.GONE);
         top.addView(undoBtn);
         top.addView(redoBtn);
         top.addView(playBtn);
         top.addView(more);
+        top.addView(lyricDoneBtn, Ui.lin(-2, t.dp(40)));
         col.addView(top, Ui.lin(-1, -2));
 
         // score area: score canvas + floating contextual toolbar + extended FAB + snackbars
@@ -517,7 +541,7 @@ public final class EditorActivity extends Activity implements ScoreView.Listener
 
     /** Rebuilds the floating toolbar for the current kind of selection. */
     private void updateFloatingToolbar() {
-        boolean show = !st.inputMode && st.hasSelection() && !paletteOpen();
+        boolean show = !st.inputMode && !st.lyricEdit && st.hasSelection() && !paletteOpen();
         floatingBar.setVisibility(show ? View.VISIBLE : View.GONE);
         // the FAB pairs with the floating toolbar as a compact (icon-only) FAB
         fabExtended = !show;
@@ -925,10 +949,16 @@ public final class EditorActivity extends Activity implements ScoreView.Listener
         Ui.setToggled(t, chordBtn, st.chordMode);
         Ui.setToggled(t, kbdBtn, pianoVisible);
         boolean dockWas = inputDock.getVisibility() == View.VISIBLE;
-        inputDock.setVisibility(st.inputMode ? View.VISIBLE : View.GONE);
+        boolean dockOn = st.inputMode && !st.lyricEdit;
+        inputDock.setVisibility(dockOn ? View.VISIBLE : View.GONE);
         pianoBox.setVisibility(pianoVisible ? View.VISIBLE : View.GONE);
-        if (dockWas != st.inputMode) {
-            if (st.inputMode) {
+        // lyric entry mode: the lower menus close, the top bar offers Done instead of play and overflow
+        fab.setVisibility(st.lyricEdit ? View.GONE : View.VISIBLE);
+        lyricDoneBtn.setVisibility(st.lyricEdit ? View.VISIBLE : View.GONE);
+        playBtn.setVisibility(st.lyricEdit ? View.GONE : View.VISIBLE);
+        moreBtn.setVisibility(st.lyricEdit ? View.GONE : View.VISIBLE);
+        if (dockWas != dockOn) {
+            if (dockOn) {
                 inputDock.setTranslationY(t.dp(80));
                 inputDock.animate().translationY(0).setDuration(200).start();
             }
@@ -955,7 +985,7 @@ public final class EditorActivity extends Activity implements ScoreView.Listener
     }
 
     private String statusText() {
-        if (st.lyricEdit) return "Lyrics \u00b7 Space or Enter: next note \u00b7 Esc: done";
+        if (st.lyricEdit) return "Lyric entry \u00b7 Space: next note \u00b7 tap a note to jump \u00b7 Done to finish";
         StringBuilder sb = new StringBuilder();
         if (st.inputMode && st.cursor != null) {
             sb.append(getString(R.string.note_input)).append(" · ");
@@ -1655,15 +1685,42 @@ public final class EditorActivity extends Activity implements ScoreView.Listener
         showWithKeyboard(d, e);
     }
 
-    /** Starts typing the lyric of the selected chord directly on the score. */
+    /**
+     * Enters lyric entry mode: the lower menus close and typing happens on the score, starting at
+     * the selected chord (or the first chord). The on-screen keyboard opens unless a physical
+     * keyboard is attached.
+     */
     void startLyricEntry() {
-        ChordRest cr = st == null ? null : st.selectedChordRest();
-        if (!(cr instanceof Chord)) {
-            toast(getString(R.string.nothing_selected));
+        if (st == null) return;
+        Pos p = st.lyricStartPos();
+        if (p == null) {
+            toast("There are no notes to add lyrics to");
             return;
         }
-        st.beginLyric(st.selPos);
+        if (paletteOpen()) closePalette();
+        if (st.inputMode) st.stopInput();
+        st.beginLyric(p);
         refresh();
+    }
+
+    /** Undo/redo that keeps lyric entry mode going on the same chord. */
+    private void undoRedo(boolean redo) {
+        boolean lyric = st.lyricEdit;
+        Pos at = st.selPos;
+        if (redo) st.redo();
+        else st.undo();
+        if (lyric) st.beginLyric(at);
+    }
+
+    /** True if a hardware keyboard is attached, in which case the on-screen keyboard stays closed. */
+    private boolean hasPhysicalKeyboard() {
+        for (int id : android.view.InputDevice.getDeviceIds()) {
+            android.view.InputDevice d = android.view.InputDevice.getDevice(id);
+            if (d != null && !d.isVirtual()
+                    && (d.getSources() & android.view.InputDevice.SOURCE_KEYBOARD) == android.view.InputDevice.SOURCE_KEYBOARD
+                    && d.getKeyboardType() == android.view.InputDevice.KEYBOARD_TYPE_ALPHABETIC) return true;
+        }
+        return false;
     }
 
     /** Keys while typing a lyric. Returns false for shortcuts (Ctrl/Alt/Meta), which keep their meaning. */
@@ -1704,7 +1761,7 @@ public final class EditorActivity extends Activity implements ScoreView.Listener
         boolean on = st.lyricEdit;
         if (on && !lyricInputOn) {
             lyricInputOn = true;
-            view.startLyricInput();
+            view.startLyricInput(!hasPhysicalKeyboard());
         } else if (!on && lyricInputOn) {
             lyricInputOn = false;
             view.stopLyricInput();
@@ -2014,11 +2071,10 @@ public final class EditorActivity extends Activity implements ScoreView.Listener
         } else if (ctrl) {
             switch (keyCode) {
                 case KeyEvent.KEYCODE_Z:
-                    if (shift) st.redo();
-                    else st.undo();
+                    undoRedo(shift);
                     break;
                 case KeyEvent.KEYCODE_Y:
-                    st.redo();
+                    undoRedo(true);
                     break;
                 case KeyEvent.KEYCODE_C:
                     st.copy();

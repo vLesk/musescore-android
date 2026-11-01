@@ -315,15 +315,26 @@ public final class ScoreView extends View {
         return (InputMethodManager) getContext().getSystemService(Context.INPUT_METHOD_SERVICE);
     }
 
-    /** Shows the on-screen keyboard for typing a lyric, and keeps the lyric above it. */
-    public void startLyricInput() {
+    /**
+     * Starts lyric input. With showKeyboard, opens the on-screen keyboard and keeps the lyric
+     * above it; without it (a physical keyboard is attached), only takes the focus.
+     */
+    public void startLyricInput(final boolean showKeyboard) {
+        // in touch mode a view only takes the focus (and so the keyboard) if it asks for it
+        setFocusableInTouchMode(true);
         requestFocus();
-        InputMethodManager imm = inputMethods();
-        if (imm != null) {
-            imm.restartInput(this);
-            imm.showSoftInput(this, InputMethodManager.SHOW_IMPLICIT);
+        if (showKeyboard) {
+            post(new Runnable() {
+                @Override
+                public void run() {
+                    InputMethodManager imm = inputMethods();
+                    if (imm == null || state == null || !state.lyricEdit) return;
+                    imm.restartInput(ScoreView.this);
+                    imm.showSoftInput(ScoreView.this, InputMethodManager.SHOW_IMPLICIT);
+                }
+            });
         }
-        if (lyricLayoutListener == null) {
+        if (showKeyboard && lyricLayoutListener == null) {
             lyricLayoutListener = new ViewTreeObserver.OnGlobalLayoutListener() {
                 @Override
                 public void onGlobalLayout() {
@@ -640,17 +651,23 @@ public final class ScoreView extends View {
 
     private void handleTap(float x, float y) {
         if (dl == null || state == null) return;
-        DisplayList.Hit lyric = findLyricHit(toScoreX(x), toScoreY(y));
+        float sx = toScoreX(x), sy = toScoreY(y);
+        DisplayList.Hit lyric = findLyricHit(sx, sy);
+        if (lyric == null && state.lyricEdit) {
+            // lyric entry mode: a tap on a note moves typing to it, any other tap is ignored
+            DisplayList.Hit note = findHit(sx, sy);
+            if (note != null && note.cr != null) lyric = note;
+            else return;
+        }
         if (lyric != null) {
-            // tapping a lyric opens it for editing, at its end
+            // tapping a lyric (or, in lyric entry mode, a note) types on that chord, at the end of its lyric
             if (!state.beginLyric(lyric.pos)) return;
             Ui.haptic(this);
             invalidate();
-            if (listener != null) listener.onSelectionChanged();
+            if (listener != null) listener.onLyricChanged();
             ensureLyricVisible();
             return;
         }
-        if (state.lyricEdit) state.endLyric();
         DisplayList.Hit h = findHit(toScoreX(x), toScoreY(y));
         if (h == null) {
             state.clearSelection();
@@ -665,7 +682,7 @@ public final class ScoreView extends View {
     }
 
     private void handleLongPress(float x, float y) {
-        if (dl == null || state == null) return;
+        if (dl == null || state == null || state.lyricEdit) return;
         DisplayList.Hit h = findHit(toScoreX(x), toScoreY(y));
         if (h == null) return;
         if (state.hasSelection()) state.extendTo(h.pos.measure, h.pos.staff);

@@ -357,6 +357,14 @@ public class ModelTests {
             es.beginLyric(c3);
             es.endLyric();
             check(lyricAt(es, c3) == null, "an empty syllable is not kept");
+            // where lyric entry starts
+            es.clearSelection();
+            Pos start = es.lyricStartPos();
+            check(start != null && start.measure == 0 && start.tick == 0, "nothing selected: starts at the first chord");
+            es.selectNote(b, -1);
+            start = es.lyricStartPos();
+            check(start != null && start.tick == 480, "starts at the selected chord");
+            check(new io.github.vlesk.stave.edit.EditorState(pianoScore()).lyricStartPos() == null, "no chords: no start");
         }
 
         // MuseScore's own test files
