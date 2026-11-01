@@ -1,14 +1,22 @@
 name: Build and release APK
 
+# Versioning: releases start at 0.1.0 and each new release bumps the minor version
+# (0.1.0, 0.2.0, 0.3.0, ...). Run manually without a version to get the next minor
+# version automatically, or push a tag like v0.3.0.
+
 on:
   push:
     tags: ['v*']
   workflow_dispatch:
     inputs:
       version:
-        description: 'Version name (e.g. 1.0.0)'
-        required: true
-        default: '1.1.0'
+        description: 'Version (e.g. 0.3.0). Leave empty for the next minor version.'
+        required: false
+        default: ''
+      ref:
+        description: 'Commit, branch or tag to build (default: the branch the workflow runs on)'
+        required: false
+        default: ''
 
 permissions:
   contents: write
@@ -18,6 +26,9 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.ref }}
+          fetch-depth: 0
 
       - uses: actions/setup-java@v4
         with:
@@ -31,9 +42,24 @@ jobs:
 
       - name: Version
         id: v
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then V="${{ inputs.version }}"; else V="${GITHUB_REF_NAME#v}"; fi
+          if [ "${{ github.event_name }}" = "push" ]; then
+            V="${GITHUB_REF_NAME#v}"
+          elif [ -n "${{ inputs.version }}" ]; then
+            V="${{ inputs.version }}"
+          else
+            LAST=$(gh release list --repo "$GITHUB_REPOSITORY" --limit 100 --json tagName --jq '.[].tagName' \
+                   | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sed 's/^v//' | sort -V | tail -1)
+            if [ -z "$LAST" ]; then V=0.1.0; else
+              IFS=. read -r MA MI PA <<< "$LAST"; V="$MA.$((MI + 1)).0"; fi
+          fi
+          IFS=. read -r MA MI PA <<< "$V"
           echo "name=$V" >> "$GITHUB_OUTPUT"
+          echo "code=$((MA * 10000 + MI * 100 + PA))" >> "$GITHUB_OUTPUT"
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          echo "Building $V (versionCode $((MA * 10000 + MI * 100 + PA))) from $(git rev-parse --short HEAD)"
 
       - name: Cache Android platform jars
         uses: actions/cache@v4
@@ -47,7 +73,7 @@ jobs:
       - name: Build APK
         env:
           VERSION_NAME: ${{ steps.v.outputs.name }}
-          VERSION_CODE: ${{ github.run_number }}
+          VERSION_CODE: ${{ steps.v.outputs.code }}
         run: |
           tools/build.sh
           cp build/stave.apk "stave-${VERSION_NAME}.apk"
@@ -59,6 +85,6 @@ jobs:
           V: ${{ steps.v.outputs.name }}
         run: |
           gh release create "v$V" "stave-$V.apk" "stave-$V.apk.sha256" \
-            --title "Stave $V" --target "${{ github.sha }}" \
+            --repo "$GITHUB_REPOSITORY" --title "Stave $V" --target "${{ steps.v.outputs.sha }}" \
             --notes "Android port of MuseScore's notation editor. Install stave-$V.apk on Android 7.0+ (allow installing unknown apps). Signed with the public debug key in keystore/; see README." \
-            || gh release upload "v$V" "stave-$V.apk" "stave-$V.apk.sha256" --clobber
+            || gh release upload "v$V" "stave-$V.apk" "stave-$V.apk.sha256" --repo "$GITHUB_REPOSITORY" --clobber

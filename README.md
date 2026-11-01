@@ -6,7 +6,8 @@ tablets. It reads and writes MuseScore's own file format (`.mscz` / `.mscx`), us
 note input mode, palettes, voices, and MuseScore's keyboard shortcuts. The desktop interface was
 redesigned for touch screens.
 
-> **Download:** [`dist/stave-1.1.0.apk`](dist/stave-1.1.0.apk) (Android 7.0+, targets Android 15).
+> **Download:** the latest APK from [Releases](https://github.com/vLesk/musescore-android/releases/latest)
+> (or [`dist/stave-0.2.0.apk`](dist/stave-0.2.0.apk)). Android 7.0+, targets Android 15.
 > Enable *Install unknown apps* for your browser or file manager, then open the APK.
 
 *Unofficial project. "MuseScore" is a trademark of Muse Group, and this app is not affiliated
@@ -110,6 +111,22 @@ For a release key, set `STAVE_KEYSTORE`, `STAVE_KEYSTORE_PASS` and `STAVE_KEY_AL
 
 Android Studio users can open the project with the provided Gradle files instead (standard
 `app/src/main` layout). Those files were not exercised in this repository's build environment.
+
+## Versioning and releases
+
+Releases start at **0.1.0**, and each release increases the minor version (0.2.0, 0.3.0, …).
+The Android `versionCode` is derived from the version (`major·10000 + minor·100 + patch`), so
+every release installs over the previous one.
+
+To publish a release, run **Actions → Build and release APK → Run workflow**. Leave the version
+empty to get the next minor version automatically. Pushing a tag such as `v0.3.0` also works.
+The workflow runs the tests, builds and signs the APK, and attaches it with its SHA-256 checksum
+to a GitHub release. *Delete release* is a maintenance workflow that removes a release and its tag.
+
+| Version | Highlights |
+|---|---|
+| 0.1.0 | First Android port: score model, MuseScore/MusicXML/MIDI/PDF I/O, engraving, note input, piano keyboard, palettes, playback |
+| 0.2.0 | Redesign: floating contextual toolbar, docked note-input toolbar with button groups and labels, Undo snackbars, library search and sorting, first-run tip |
 
 ## Tests
 
